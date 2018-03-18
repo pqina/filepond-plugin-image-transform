@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 1.0.0
+ * FilePondPluginImageTransform 1.0.1
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -274,7 +274,9 @@ var plugin$1 = _ => {
         }
 
         // compression quality 0 => 100
-        const quality = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
+        const qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
+        const quality =
+          qualityAsPercentage === null ? null : qualityAsPercentage / 100;
 
         // output format
         const type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
