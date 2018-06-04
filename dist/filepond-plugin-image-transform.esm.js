@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 1.0.2
+ * FilePondPluginImageTransform 1.1.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -127,7 +127,7 @@ const TransformWorker = () => {
   // Transforms
   //
   function resize(imageData, data) {
-    const { mode } = data;
+    const { mode, upscale } = data;
     let { width, height } = data.size;
 
     if (width === null) {
@@ -135,6 +135,7 @@ const TransformWorker = () => {
     } else if (height === null) {
       height = width;
     }
+
     if (mode !== 'force') {
       let scalarWidth = width / imageData.width;
       let scalarHeight = height / imageData.height;
@@ -144,6 +145,12 @@ const TransformWorker = () => {
       } else if (mode === 'contain') {
         scalar = Math.min(scalarWidth, scalarHeight);
       }
+
+      // if image is too small, exit here with original image
+      if (scalar > 1 && upscale === false) {
+        return imageData;
+      }
+
       width = imageData.width * scalar;
       height = imageData.height * scalar;
     }

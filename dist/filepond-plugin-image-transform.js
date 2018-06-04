@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 1.0.2
+ * FilePondPluginImageTransform 1.1.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -290,7 +290,8 @@
     // Transforms
     //
     function resize(imageData, data) {
-      var mode = data.mode;
+      var mode = data.mode,
+        upscale = data.upscale;
       var _data$size = data.size,
         width = _data$size.width,
         height = _data$size.height;
@@ -300,6 +301,7 @@
       } else if (height === null) {
         height = width;
       }
+
       if (mode !== 'force') {
         var scalarWidth = width / imageData.width;
         var scalarHeight = height / imageData.height;
@@ -309,6 +311,12 @@
         } else if (mode === 'contain') {
           scalar = Math.min(scalarWidth, scalarHeight);
         }
+
+        // if image is too small, exit here with original image
+        if (scalar > 1 && upscale === false) {
+          return imageData;
+        }
+
         width = imageData.width * scalar;
         height = imageData.height * scalar;
       }
