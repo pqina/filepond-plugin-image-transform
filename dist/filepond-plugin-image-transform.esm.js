@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 1.1.0
+ * FilePondPluginImageTransform 1.1.1
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -247,7 +247,8 @@ var plugin$1 = _ => {
     loadImage,
     getFileFromBlob,
     getFilenameWithoutExtension,
-    createWorker
+    createWorker,
+    isFile
   } = utils;
 
   // renames the output file to match the format
@@ -276,7 +277,11 @@ var plugin$1 = _ => {
     (file, { query, item }) =>
       new Promise((resolve, reject) => {
         // if the file is not an image we do not have any business transforming it
-        if (!isImage(file) || !query('GET_ALLOW_IMAGE_TRANSFORM')) {
+        if (
+          !isFile(file) ||
+          !isImage(file) ||
+          !query('GET_ALLOW_IMAGE_TRANSFORM')
+        ) {
           return resolve(file);
         }
 
