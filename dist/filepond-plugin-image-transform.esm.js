@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 1.1.2
+ * FilePondPluginImageTransform 2.0.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -248,6 +248,8 @@ var plugin$1 = _ => {
     getFileFromBlob,
     getFilenameWithoutExtension,
     createWorker,
+    createBlob,
+    renameFile,
     isFile
   } = utils;
 
@@ -336,6 +338,91 @@ var plugin$1 = _ => {
 
         // get file url
         const url = URL.createObjectURL(file);
+
+        // if this is an svg and we want it to stay an svg
+        if (/svg/.test(file.type) && type === null) {
+          // no cropping? Done (as the SVG is vector data we're not resizing it)
+          if (!crop) {
+            return resolve(file);
+          }
+
+          // load file contents and wrap in crop svg
+          const fr = new FileReader();
+          fr.onloadend = () => {
+            // create element with svg and get size
+            const original = document.createElement('div');
+            original.style.cssText = `position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;`;
+            original.innerHTML = fr.result;
+            const originalNode = original.querySelector('svg');
+            document.body.appendChild(original);
+
+            // request bounding box dimensions
+            const bBox = originalNode.getBBox();
+            original.parentNode.removeChild(original);
+
+            // calculate new heights and widths
+            const viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
+            const widthAttribute = originalNode.getAttribute('width') || '';
+            const heightAttribute = originalNode.getAttribute('height') || '';
+            let width = parseFloat(widthAttribute) || null;
+            let height = parseFloat(heightAttribute) || null;
+            const widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
+            const heightUnits =
+              (heightAttribute.match(/[a-z]+/) || [])[0] || '';
+
+            // remove width and height of original
+            originalNode.removeAttribute('width');
+            originalNode.removeAttribute('height');
+            const source = originalNode.outerHTML;
+
+            // create new size
+            const viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
+            const viewBox = viewBoxList.length
+              ? {
+                  x: viewBoxList[0],
+                  y: viewBoxList[1],
+                  width: viewBoxList[2],
+                  height: viewBoxList[3]
+                }
+              : bBox;
+
+            if (!width) {
+              width = viewBox.width;
+            }
+
+            if (!height) {
+              height = viewBox.height;
+            }
+
+            // target
+            const targetWidth = `width="${width *
+              crop.rect.width}${widthUnits}"`;
+            const targetHeight = `height="${height *
+              crop.rect.height}${heightUnits}"`;
+            const translate = {
+              x: width * -crop.rect.x,
+              y: height * -crop.rect.y
+            };
+
+            // crop
+            const transformed = `<?xml version="1.0" encoding="UTF-8"?>
+<svg ${targetWidth} ${targetHeight} 
+  viewBox="0 0 ${width} ${height}" 
+  preserveAspectRatio="xMinYMin slice"
+  xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(${translate.x}, ${translate.y})">
+    ${source}
+  </g>
+</svg>`;
+
+            // create new svg file
+            resolve(
+              renameFile(createBlob(transformed, 'image/svg+xml'), file.name)
+            );
+          };
+          fr.readAsText(file);
+          return;
+        }
 
         // turn the file into an image
         loadImage(url).then(image => {

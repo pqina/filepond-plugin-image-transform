@@ -1,6 +1,6 @@
 {
     "name": "filepond-plugin-image-transform",
-    "version": "1.1.2",
+    "version": "2.0.0",
     "description": "Image Transform Plugin for FilePond",
     "homepage": "https://pqina.nl/filepond",
     "repository": "pqina/filepond-plugin-image-transform",

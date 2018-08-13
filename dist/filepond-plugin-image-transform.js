@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 1.1.2
+ * FilePondPluginImageTransform 2.0.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -420,6 +420,8 @@
       getFileFromBlob = utils.getFileFromBlob,
       getFilenameWithoutExtension = utils.getFilenameWithoutExtension,
       createWorker = utils.createWorker,
+      createBlob = utils.createBlob,
+      renameFile = utils.renameFile,
       isFile = utils.isFile;
 
     // renames the output file to match the format
@@ -514,6 +516,98 @@
 
         // get file url
         var url = URL.createObjectURL(file);
+
+        // if this is an svg and we want it to stay an svg
+        if (/svg/.test(file.type) && type === null) {
+          // no cropping? Done (as the SVG is vector data we're not resizing it)
+          if (!crop) {
+            return resolve(file);
+          }
+
+          // load file contents and wrap in crop svg
+          var fr = new FileReader();
+          fr.onloadend = function() {
+            // create element with svg and get size
+            var original = document.createElement('div');
+            original.style.cssText =
+              'position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;';
+            original.innerHTML = fr.result;
+            var originalNode = original.querySelector('svg');
+            document.body.appendChild(original);
+
+            // request bounding box dimensions
+            var bBox = originalNode.getBBox();
+            original.parentNode.removeChild(original);
+
+            // calculate new heights and widths
+            var viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
+            var widthAttribute = originalNode.getAttribute('width') || '';
+            var heightAttribute = originalNode.getAttribute('height') || '';
+            var width = parseFloat(widthAttribute) || null;
+            var height = parseFloat(heightAttribute) || null;
+            var widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
+            var heightUnits = (heightAttribute.match(/[a-z]+/) || [])[0] || '';
+
+            // remove width and height of original
+            originalNode.removeAttribute('width');
+            originalNode.removeAttribute('height');
+            var source = originalNode.outerHTML;
+
+            // create new size
+            var viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
+            var viewBox = viewBoxList.length
+              ? {
+                  x: viewBoxList[0],
+                  y: viewBoxList[1],
+                  width: viewBoxList[2],
+                  height: viewBoxList[3]
+                }
+              : bBox;
+
+            if (!width) {
+              width = viewBox.width;
+            }
+
+            if (!height) {
+              height = viewBox.height;
+            }
+
+            // target
+            var targetWidth =
+              'width="' + width * crop.rect.width + widthUnits + '"';
+            var targetHeight =
+              'height="' + height * crop.rect.height + heightUnits + '"';
+            var translate = {
+              x: width * -crop.rect.x,
+              y: height * -crop.rect.y
+            };
+
+            // crop
+            var transformed =
+              '<?xml version="1.0" encoding="UTF-8"?>\n<svg ' +
+              targetWidth +
+              ' ' +
+              targetHeight +
+              ' \n  viewBox="0 0 ' +
+              width +
+              ' ' +
+              height +
+              '" \n  preserveAspectRatio="xMinYMin slice"\n  xmlns="http://www.w3.org/2000/svg">\n  <g transform="translate(' +
+              translate.x +
+              ', ' +
+              translate.y +
+              ')">\n    ' +
+              source +
+              '\n  </g>\n</svg>';
+
+            // create new svg file
+            resolve(
+              renameFile(createBlob(transformed, 'image/svg+xml'), file.name)
+            );
+          };
+          fr.readAsText(file);
+          return;
+        }
 
         // turn the file into an image
         loadImage(url).then(function(image) {
