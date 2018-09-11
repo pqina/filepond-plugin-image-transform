@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 2.0.1
+ * FilePondPluginImageTransform 2.1.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -16,122 +16,6 @@
   var isImage = function isImage(file) {
     return /^image/.test(file.type);
   };
-
-  var asyncGenerator = (function() {
-    function AwaitValue(value) {
-      this.value = value;
-    }
-
-    function AsyncGenerator(gen) {
-      var front, back;
-
-      function send(key, arg) {
-        return new Promise(function(resolve, reject) {
-          var request = {
-            key: key,
-            arg: arg,
-            resolve: resolve,
-            reject: reject,
-            next: null
-          };
-
-          if (back) {
-            back = back.next = request;
-          } else {
-            front = back = request;
-            resume(key, arg);
-          }
-        });
-      }
-
-      function resume(key, arg) {
-        try {
-          var result = gen[key](arg);
-          var value = result.value;
-
-          if (value instanceof AwaitValue) {
-            Promise.resolve(value.value).then(
-              function(arg) {
-                resume('next', arg);
-              },
-              function(arg) {
-                resume('throw', arg);
-              }
-            );
-          } else {
-            settle(result.done ? 'return' : 'normal', result.value);
-          }
-        } catch (err) {
-          settle('throw', err);
-        }
-      }
-
-      function settle(type, value) {
-        switch (type) {
-          case 'return':
-            front.resolve({
-              value: value,
-              done: true
-            });
-            break;
-
-          case 'throw':
-            front.reject(value);
-            break;
-
-          default:
-            front.resolve({
-              value: value,
-              done: false
-            });
-            break;
-        }
-
-        front = front.next;
-
-        if (front) {
-          resume(front.key, front.arg);
-        } else {
-          back = null;
-        }
-      }
-
-      this._invoke = send;
-
-      if (typeof gen.return !== 'function') {
-        this.return = undefined;
-      }
-    }
-
-    if (typeof Symbol === 'function' && Symbol.asyncIterator) {
-      AsyncGenerator.prototype[Symbol.asyncIterator] = function() {
-        return this;
-      };
-    }
-
-    AsyncGenerator.prototype.next = function(arg) {
-      return this._invoke('next', arg);
-    };
-
-    AsyncGenerator.prototype.throw = function(arg) {
-      return this._invoke('throw', arg);
-    };
-
-    AsyncGenerator.prototype.return = function(arg) {
-      return this._invoke('return', arg);
-    };
-
-    return {
-      wrap: function(fn) {
-        return function() {
-          return new AsyncGenerator(fn.apply(this, arguments));
-        };
-      },
-      await: function(value) {
-        return new AwaitValue(value);
-      }
-    };
-  })();
 
   var toConsumableArray = function(arr) {
     if (Array.isArray(arr)) {
@@ -466,6 +350,7 @@
         var qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
         var quality =
           qualityAsPercentage === null ? null : qualityAsPercentage / 100;
+        var qualityMode = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY_MODE');
 
         // output format
         var type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
@@ -488,8 +373,14 @@
           });
         });
 
-        // no transforms defined, we done!
-        if (quality === null && type === null && !crop && !transforms.length) {
+        // no transforms defined, or quality change not required, we done!
+        if (
+          (quality === null ||
+            (quality !== null && qualityMode === 'optional')) &&
+          type === null &&
+          !crop &&
+          !transforms.length
+        ) {
           return resolve(file);
         }
 
@@ -665,7 +556,14 @@
         imageTransformOutputMimeType: [null, Type.STRING],
 
         // null, 0 - 100
-        imageTransformOutputQuality: [null, Type.INT]
+        imageTransformOutputQuality: [null, Type.INT],
+
+        // only apply output quality when a transform is required
+        imageTransformOutputQualityMode: ['always', Type.STRING]
+
+        // 'always'
+        // 'optional'
+        // 'mismatch' (future feature, only applied if quality differs from input)
       }
     };
   };

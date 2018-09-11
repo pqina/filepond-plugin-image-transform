@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 2.0.1
+ * FilePondPluginImageTransform 2.1.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -291,6 +291,7 @@ var plugin$1 = _ => {
         const qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
         const quality =
           qualityAsPercentage === null ? null : qualityAsPercentage / 100;
+        const qualityMode = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY_MODE');
 
         // output format
         const type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
@@ -310,8 +311,14 @@ var plugin$1 = _ => {
           });
         });
 
-        // no transforms defined, we done!
-        if (quality === null && type === null && !crop && !transforms.length) {
+        // no transforms defined, or quality change not required, we done!
+        if (
+          (quality === null ||
+            (quality !== null && qualityMode === 'optional')) &&
+          type === null &&
+          !crop &&
+          !transforms.length
+        ) {
           return resolve(file);
         }
 
@@ -481,7 +488,14 @@ var plugin$1 = _ => {
       imageTransformOutputMimeType: [null, Type.STRING],
 
       // null, 0 - 100
-      imageTransformOutputQuality: [null, Type.INT]
+      imageTransformOutputQuality: [null, Type.INT],
+
+      // only apply output quality when a transform is required
+      imageTransformOutputQualityMode: ['always', Type.STRING]
+
+      // 'always'
+      // 'optional'
+      // 'mismatch' (future feature, only applied if quality differs from input)
     }
   };
 };
