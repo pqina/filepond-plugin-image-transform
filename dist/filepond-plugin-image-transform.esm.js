@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 2.1.0
+ * FilePondPluginImageTransform 3.0.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
