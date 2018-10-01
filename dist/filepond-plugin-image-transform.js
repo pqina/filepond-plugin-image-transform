@@ -72,14 +72,149 @@
     );
   };
 
-  var imageToImageData = function imageToImageData(image, rect, orientation) {
-    if (!rect) {
-      rect = {
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1
-      };
+  var createVector = function createVector(x, y) {
+    return { x: x, y: y };
+  };
+
+  var vectorDot = function vectorDot(a, b) {
+    return a.x * b.x + a.y * b.y;
+  };
+
+  var vectorSubtract = function vectorSubtract(a, b) {
+    return createVector(a.x - b.x, a.y - b.y);
+  };
+
+  var vectorDistanceSquared = function vectorDistanceSquared(a, b) {
+    return vectorDot(vectorSubtract(a, b), vectorSubtract(a, b));
+  };
+
+  var vectorDistance = function vectorDistance(a, b) {
+    return Math.sqrt(vectorDistanceSquared(a, b));
+  };
+
+  var getOffsetPointOnEdge = function getOffsetPointOnEdge(length, rotation) {
+    var a = length;
+
+    var A = 1.5707963267948966;
+    var B = rotation;
+    var C = 1.5707963267948966 - rotation;
+
+    var sinA = Math.sin(A);
+    var sinB = Math.sin(B);
+    var sinC = Math.sin(C);
+    var cosC = Math.cos(C);
+    var ratio = a / sinA;
+    var b = ratio * sinB;
+    var c = ratio * sinC;
+
+    return createVector(cosC * b, cosC * c);
+  };
+
+  var getRotatedRectSize = function getRotatedRectSize(rect, rotation) {
+    var w = rect.width;
+    var h = rect.height;
+
+    var hor = getOffsetPointOnEdge(w, rotation);
+    var ver = getOffsetPointOnEdge(h, rotation);
+
+    var tl = createVector(rect.x + Math.abs(hor.x), rect.y - Math.abs(hor.y));
+
+    var tr = createVector(
+      rect.x + rect.width + Math.abs(ver.y),
+      rect.y + Math.abs(ver.x)
+    );
+
+    var bl = createVector(
+      rect.x - Math.abs(ver.y),
+      rect.y + rect.height - Math.abs(ver.x)
+    );
+
+    return {
+      width: vectorDistance(tl, tr),
+      height: vectorDistance(tl, bl)
+    };
+  };
+
+  var getImageRectZoomFactor = function getImageRectZoomFactor(
+    imageRect,
+    cropRect,
+    rotation,
+    center
+  ) {
+    // calculate available space round image center position
+    var cx = center.x > 0.5 ? 1 - center.x : center.x;
+    var cy = center.y > 0.5 ? 1 - center.y : center.y;
+    var imageWidth = cx * 2 * imageRect.width;
+    var imageHeight = cy * 2 * imageRect.height;
+
+    // calculate rotated crop rectangle size
+    var rotatedCropSize = getRotatedRectSize(cropRect, rotation);
+
+    // calculate scalar required to fit image
+    return Math.max(
+      rotatedCropSize.width / imageWidth,
+      rotatedCropSize.height / imageHeight
+    );
+  };
+
+  var getCenteredCropRect = function getCenteredCropRect(
+    container,
+    aspectRatio
+  ) {
+    var width = container.width;
+    var height = width * aspectRatio;
+    if (height > container.height) {
+      height = container.height;
+      width = height / aspectRatio;
+    }
+    var x = (container.width - width) * 0.5;
+    var y = (container.height - height) * 0.5;
+
+    return {
+      x: x,
+      y: y,
+      width: width,
+      height: height
+    };
+  };
+
+  var calculateCanvasSize = function calculateCanvasSize(
+    image,
+    canvasAspectRatio,
+    zoom
+  ) {
+    var imageAspectRatio = image.height / image.width;
+
+    // determine actual pixels on x and y axis
+    var canvasWidth = 1;
+    var canvasHeight = canvasAspectRatio;
+    var imgWidth = 1;
+    var imgHeight = imageAspectRatio;
+    if (imgHeight > canvasHeight) {
+      imgHeight = canvasHeight;
+      imgWidth = imgHeight / imageAspectRatio;
+    }
+
+    var scalar = Math.max(canvasWidth / imgWidth, canvasHeight / imgHeight);
+
+    var width = image.width / (zoom * imgWidth * scalar);
+    var height = width * canvasAspectRatio;
+
+    return {
+      width: Math.round(width),
+      height: Math.round(height)
+    };
+  };
+
+  var isFlipped = function isFlipped(flip) {
+    return flip.horizontal || flip.vertical;
+  };
+
+  var getBitmap = function getBitmap(image, orientation, flip) {
+    if (!orientation && !isFlipped(flip)) {
+      image.width = image.naturalWidth;
+      image.height = image.naturalHeight;
+      return image;
     }
 
     var canvas = document.createElement('canvas');
@@ -95,23 +230,236 @@
       canvas.height = height;
     }
 
-    // draw the image
+    // draw the image but first fix orientation and set correct flip
     var ctx = canvas.getContext('2d');
-    ctx.save();
-    fixImageOrientation(ctx, width, height, orientation);
-    ctx.drawImage(image, 0, 0, width, height);
-    ctx.restore();
+    if (orientation) {
+      ctx.save();
+      fixImageOrientation(ctx, width, height, orientation);
+      ctx.restore();
+    }
 
-    // apply crop to get correct slice of data
-    var data = ctx.getImageData(
-      Math.round(rect.x * canvas.width),
-      Math.round(rect.y * canvas.height),
-      Math.round(rect.width * canvas.width),
-      Math.round(rect.height * canvas.height)
+    if (isFlipped(flip)) {
+      ctx.translate(canvas.width * 0.5, canvas.height * 0.5);
+      ctx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1);
+      ctx.translate(-canvas.width * 0.5, -canvas.height * 0.5);
+    }
+
+    ctx.drawImage(image, 0, 0, width, height);
+
+    return canvas;
+  };
+
+  var imageToImageData = function imageToImageData(
+    imageElement,
+    orientation,
+    crop
+  ) {
+    // fixes possible image orientation problems by drawing the image on the correct canvas
+    var bitmap = getBitmap(imageElement, orientation, crop.flip);
+    var imageSize = {
+      width: bitmap.width,
+      height: bitmap.height
+    };
+
+    var canvas = document.createElement('canvas');
+    var aspectRatio = crop.aspectRatio || imageSize.height / imageSize.width;
+    var canvasSize = calculateCanvasSize(imageSize, aspectRatio, crop.zoom);
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
+
+    var canvasCenter = {
+      x: canvas.width * 0.5,
+      y: canvas.height * 0.5
+    };
+
+    var imageOffset = {
+      x: canvasCenter.x - imageSize.width * crop.center.x,
+      y: canvasCenter.y - imageSize.height * crop.center.y
+    };
+
+    var stage = {
+      x: 0,
+      y: 0,
+      width: canvas.width,
+      height: canvas.height,
+      center: canvasCenter
+    };
+
+    var stageZoomFactor = getImageRectZoomFactor(
+      imageSize,
+      getCenteredCropRect(stage, aspectRatio),
+      crop.rotation,
+      crop.center
     );
 
-    // done!
-    return data;
+    var scale = crop.zoom * stageZoomFactor;
+
+    // start drawing
+    var ctx = canvas.getContext('2d');
+
+    // move to draw offset
+    ctx.translate(canvasCenter.x, canvasCenter.y);
+    ctx.rotate(crop.rotation);
+    ctx.scale(scale, scale);
+
+    // draw the image
+    ctx.drawImage(
+      bitmap,
+      imageOffset.x - canvasCenter.x,
+      imageOffset.y - canvasCenter.y,
+      imageSize.width,
+      imageSize.height
+    );
+
+    // get data from canvas
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  };
+
+  var cropSVG = function cropSVG(file, crop) {
+    return new Promise(function(resolve, reject) {
+      // load file contents and wrap in crop svg
+      var fr = new FileReader();
+      fr.onloadend = function() {
+        // get svg text
+        var text = fr.result;
+
+        // create element with svg and get size
+        var original = document.createElement('div');
+        original.style.cssText =
+          'position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;';
+        original.innerHTML = text;
+        var originalNode = original.querySelector('svg');
+        document.body.appendChild(original);
+
+        // request bounding box dimensions
+        var bBox = originalNode.getBBox();
+        original.parentNode.removeChild(original);
+
+        // get title
+        var titleNode = original.querySelector('title');
+
+        // calculate new heights and widths
+        var viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
+        var widthAttribute = originalNode.getAttribute('width') || '';
+        var heightAttribute = originalNode.getAttribute('height') || '';
+        var width = parseFloat(widthAttribute) || null;
+        var height = parseFloat(heightAttribute) || null;
+        var widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
+        var heightUnits = (heightAttribute.match(/[a-z]+/) || [])[0] || '';
+
+        // create new size
+        var viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
+        var viewBox = viewBoxList.length
+          ? {
+              x: viewBoxList[0],
+              y: viewBoxList[1],
+              width: viewBoxList[2],
+              height: viewBoxList[3]
+            }
+          : bBox;
+
+        var imageWidth = width != null ? width : viewBox.width;
+        var imageHeight = height != null ? height : viewBox.height;
+
+        originalNode.style.overflow = 'visible';
+        originalNode.setAttribute('width', imageWidth);
+        originalNode.setAttribute('height', imageHeight);
+
+        var aspectRatio = crop.aspectRatio || imageHeight / imageWidth;
+
+        var canvasWidth = imageWidth;
+        var canvasHeight = canvasWidth * aspectRatio;
+
+        var canvasZoomFactor = getImageRectZoomFactor(
+          {
+            width: imageWidth,
+            height: imageHeight
+          },
+          getCenteredCropRect(
+            {
+              width: canvasWidth,
+              height: canvasHeight
+            },
+            aspectRatio
+          ),
+          crop.rotation,
+          crop.center
+        );
+
+        var scale = crop.zoom * canvasZoomFactor;
+
+        var rotation = crop.rotation * (180 / Math.PI);
+
+        var canvasCenter = {
+          x: canvasWidth * 0.5,
+          y: canvasHeight * 0.5
+        };
+
+        var imageOffset = {
+          x: canvasCenter.x - imageWidth * crop.center.x,
+          y: canvasCenter.y - imageHeight * crop.center.y
+        };
+
+        var cropTransforms = [
+          // rotate
+          'rotate(' +
+            rotation +
+            ' ' +
+            canvasCenter.x +
+            ' ' +
+            canvasCenter.y +
+            ')',
+
+          // scale
+          'translate(' + canvasCenter.x + ' ' + canvasCenter.y + ')',
+          'scale(' + scale + ')',
+          'translate(' + -canvasCenter.x + ' ' + -canvasCenter.y + ')',
+
+          // offset
+          'translate(' + imageOffset.x + ' ' + imageOffset.y + ')'
+        ];
+
+        var flipTransforms = [
+          'scale(' +
+            (crop.flip.horizontal ? -1 : 1) +
+            ' ' +
+            (crop.flip.vertical ? -1 : 1) +
+            ')',
+          'translate(' +
+            (crop.flip.horizontal ? -imageWidth : 0) +
+            ' ' +
+            (crop.flip.vertical ? -imageHeight : 0) +
+            ')'
+        ];
+
+        // crop
+        var transformed =
+          '<?xml version="1.0" encoding="UTF-8"?>\n<svg width="' +
+          canvasWidth +
+          widthUnits +
+          '" height="' +
+          canvasHeight +
+          heightUnits +
+          '" \nviewBox="0 0 ' +
+          canvasWidth +
+          ' ' +
+          canvasHeight +
+          '" \npreserveAspectRatio="xMinYMin"\nxmlns="http://www.w3.org/2000/svg">\n<!-- Generator: FilePond Image Transform Plugin - https://pqina.nl/filepond -->\n<title>' +
+          (titleNode ? titleNode.textContent : file.name) +
+          '</title>\n<desc>Cropped with FilePond.</desc>\n<g transform="' +
+          cropTransforms.join(' ') +
+          '">\n<g transform="' +
+          flipTransforms.join(' ') +
+          '">\n' +
+          originalNode.outerHTML +
+          '\n</g>\n</g>\n</svg>';
+
+        // create new svg file
+        resolve(transformed);
+      };
+
+      fr.readAsText(file);
+    });
   };
 
   var imageDataToBlob = function imageDataToBlob(imageData, options) {
@@ -415,88 +763,10 @@
             return resolve(file);
           }
 
-          // load file contents and wrap in crop svg
-          var fr = new FileReader();
-          fr.onloadend = function() {
-            // create element with svg and get size
-            var original = document.createElement('div');
-            original.style.cssText =
-              'position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;';
-            original.innerHTML = fr.result;
-            var originalNode = original.querySelector('svg');
-            document.body.appendChild(original);
+          cropSVG(file, crop).then(function(text) {
+            resolve(renameFile(createBlob(text, 'image/svg+xml'), file.name));
+          });
 
-            // request bounding box dimensions
-            var bBox = originalNode.getBBox();
-            original.parentNode.removeChild(original);
-
-            // calculate new heights and widths
-            var viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
-            var widthAttribute = originalNode.getAttribute('width') || '';
-            var heightAttribute = originalNode.getAttribute('height') || '';
-            var width = parseFloat(widthAttribute) || null;
-            var height = parseFloat(heightAttribute) || null;
-            var widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
-            var heightUnits = (heightAttribute.match(/[a-z]+/) || [])[0] || '';
-
-            // remove width and height of original
-            originalNode.removeAttribute('width');
-            originalNode.removeAttribute('height');
-            var source = originalNode.outerHTML;
-
-            // create new size
-            var viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
-            var viewBox = viewBoxList.length
-              ? {
-                  x: viewBoxList[0],
-                  y: viewBoxList[1],
-                  width: viewBoxList[2],
-                  height: viewBoxList[3]
-                }
-              : bBox;
-
-            if (!width) {
-              width = viewBox.width;
-            }
-
-            if (!height) {
-              height = viewBox.height;
-            }
-
-            // target
-            var targetWidth =
-              'width="' + width * crop.rect.width + widthUnits + '"';
-            var targetHeight =
-              'height="' + height * crop.rect.height + heightUnits + '"';
-            var translate = {
-              x: width * -crop.rect.x,
-              y: height * -crop.rect.y
-            };
-
-            // crop
-            var transformed =
-              '<?xml version="1.0" encoding="UTF-8"?>\n<svg ' +
-              targetWidth +
-              ' ' +
-              targetHeight +
-              ' \n  viewBox="0 0 ' +
-              width +
-              ' ' +
-              height +
-              '" \n  preserveAspectRatio="xMinYMin slice"\n  xmlns="http://www.w3.org/2000/svg">\n  <g transform="translate(' +
-              translate.x +
-              ', ' +
-              translate.y +
-              ')">\n    ' +
-              source +
-              '\n  </g>\n</svg>';
-
-            // create new svg file
-            resolve(
-              renameFile(createBlob(transformed, 'image/svg+xml'), file.name)
-            );
-          };
-          fr.readAsText(file);
           return;
         }
 
@@ -509,11 +779,7 @@
           var orientation = (item.getMetadata('exif') || {}).orientation || -1;
 
           // draw to canvas and start transform chain
-          var imageData = imageToImageData(
-            image,
-            crop ? crop.rect : null,
-            orientation
-          );
+          var imageData = imageToImageData(image, orientation, crop);
 
           // no further transforms, we done!
           if (!transforms.length) {
@@ -568,8 +834,10 @@
     };
   };
 
-  if (typeof navigator !== 'undefined' && document) {
-    // plugin has loaded
+  var isBrowser =
+    typeof window !== 'undefined' && typeof window.document !== 'undefined';
+
+  if (isBrowser && document) {
     document.dispatchEvent(
       new CustomEvent('FilePond:pluginloaded', { detail: plugin$1 })
     );

@@ -26,14 +26,126 @@ const fixImageOrientation = (ctx, width, height, orientation) => {
   ctx.transform(...transforms[orientation](width, height));
 };
 
-const imageToImageData = (image, rect, orientation) => {
-  if (!rect) {
-    rect = {
-      x: 0,
-      y: 0,
-      width: 1,
-      height: 1
-    };
+const createVector = (x, y) => ({ x, y });
+
+const vectorDot = (a, b) => a.x * b.x + a.y * b.y;
+
+const vectorSubtract = (a, b) => createVector(a.x - b.x, a.y - b.y);
+
+const vectorDistanceSquared = (a, b) =>
+  vectorDot(vectorSubtract(a, b), vectorSubtract(a, b));
+
+const vectorDistance = (a, b) => Math.sqrt(vectorDistanceSquared(a, b));
+
+const getOffsetPointOnEdge = (length, rotation) => {
+  const a = length;
+
+  const A = 1.5707963267948966;
+  const B = rotation;
+  const C = 1.5707963267948966 - rotation;
+
+  const sinA = Math.sin(A);
+  const sinB = Math.sin(B);
+  const sinC = Math.sin(C);
+  const cosC = Math.cos(C);
+  const ratio = a / sinA;
+  const b = ratio * sinB;
+  const c = ratio * sinC;
+
+  return createVector(cosC * b, cosC * c);
+};
+
+const getRotatedRectSize = (rect, rotation) => {
+  const w = rect.width;
+  const h = rect.height;
+
+  const hor = getOffsetPointOnEdge(w, rotation);
+  const ver = getOffsetPointOnEdge(h, rotation);
+
+  const tl = createVector(rect.x + Math.abs(hor.x), rect.y - Math.abs(hor.y));
+
+  const tr = createVector(
+    rect.x + rect.width + Math.abs(ver.y),
+    rect.y + Math.abs(ver.x)
+  );
+
+  const bl = createVector(
+    rect.x - Math.abs(ver.y),
+    rect.y + rect.height - Math.abs(ver.x)
+  );
+
+  return {
+    width: vectorDistance(tl, tr),
+    height: vectorDistance(tl, bl)
+  };
+};
+
+const getImageRectZoomFactor = (imageRect, cropRect, rotation, center) => {
+  // calculate available space round image center position
+  const cx = center.x > 0.5 ? 1 - center.x : center.x;
+  const cy = center.y > 0.5 ? 1 - center.y : center.y;
+  const imageWidth = cx * 2 * imageRect.width;
+  const imageHeight = cy * 2 * imageRect.height;
+
+  // calculate rotated crop rectangle size
+  const rotatedCropSize = getRotatedRectSize(cropRect, rotation);
+
+  // calculate scalar required to fit image
+  return Math.max(
+    rotatedCropSize.width / imageWidth,
+    rotatedCropSize.height / imageHeight
+  );
+};
+
+const getCenteredCropRect = (container, aspectRatio) => {
+  let width = container.width;
+  let height = width * aspectRatio;
+  if (height > container.height) {
+    height = container.height;
+    width = height / aspectRatio;
+  }
+  const x = (container.width - width) * 0.5;
+  const y = (container.height - height) * 0.5;
+
+  return {
+    x,
+    y,
+    width,
+    height
+  };
+};
+
+const calculateCanvasSize = (image, canvasAspectRatio, zoom) => {
+  const imageAspectRatio = image.height / image.width;
+
+  // determine actual pixels on x and y axis
+  let canvasWidth = 1;
+  let canvasHeight = canvasAspectRatio;
+  let imgWidth = 1;
+  let imgHeight = imageAspectRatio;
+  if (imgHeight > canvasHeight) {
+    imgHeight = canvasHeight;
+    imgWidth = imgHeight / imageAspectRatio;
+  }
+
+  const scalar = Math.max(canvasWidth / imgWidth, canvasHeight / imgHeight);
+
+  const width = image.width / (zoom * imgWidth * scalar);
+  const height = width * canvasAspectRatio;
+
+  return {
+    width: Math.round(width),
+    height: Math.round(height)
+  };
+};
+
+const isFlipped = flip => flip.horizontal || flip.vertical;
+
+const getBitmap = (image, orientation, flip) => {
+  if (!orientation && !isFlipped(flip)) {
+    image.width = image.naturalWidth;
+    image.height = image.naturalHeight;
+    return image;
   }
 
   const canvas = document.createElement('canvas');
@@ -49,24 +161,215 @@ const imageToImageData = (image, rect, orientation) => {
     canvas.height = height;
   }
 
-  // draw the image
+  // draw the image but first fix orientation and set correct flip
   const ctx = canvas.getContext('2d');
-  ctx.save();
-  fixImageOrientation(ctx, width, height, orientation);
-  ctx.drawImage(image, 0, 0, width, height);
-  ctx.restore();
+  if (orientation) {
+    ctx.save();
+    fixImageOrientation(ctx, width, height, orientation);
+    ctx.restore();
+  }
 
-  // apply crop to get correct slice of data
-  const data = ctx.getImageData(
-    Math.round(rect.x * canvas.width),
-    Math.round(rect.y * canvas.height),
-    Math.round(rect.width * canvas.width),
-    Math.round(rect.height * canvas.height)
+  if (isFlipped(flip)) {
+    ctx.translate(canvas.width * 0.5, canvas.height * 0.5);
+    ctx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1);
+    ctx.translate(-canvas.width * 0.5, -canvas.height * 0.5);
+  }
+
+  ctx.drawImage(image, 0, 0, width, height);
+
+  return canvas;
+};
+
+const imageToImageData = (imageElement, orientation, crop) => {
+  // fixes possible image orientation problems by drawing the image on the correct canvas
+  const bitmap = getBitmap(imageElement, orientation, crop.flip);
+  const imageSize = {
+    width: bitmap.width,
+    height: bitmap.height
+  };
+
+  const canvas = document.createElement('canvas');
+  const aspectRatio = crop.aspectRatio || imageSize.height / imageSize.width;
+  const canvasSize = calculateCanvasSize(imageSize, aspectRatio, crop.zoom);
+  canvas.width = canvasSize.width;
+  canvas.height = canvasSize.height;
+
+  const canvasCenter = {
+    x: canvas.width * 0.5,
+    y: canvas.height * 0.5
+  };
+
+  const imageOffset = {
+    x: canvasCenter.x - imageSize.width * crop.center.x,
+    y: canvasCenter.y - imageSize.height * crop.center.y
+  };
+
+  const stage = {
+    x: 0,
+    y: 0,
+    width: canvas.width,
+    height: canvas.height,
+    center: canvasCenter
+  };
+
+  const stageZoomFactor = getImageRectZoomFactor(
+    imageSize,
+    getCenteredCropRect(stage, aspectRatio),
+    crop.rotation,
+    crop.center
   );
 
-  // done!
-  return data;
+  const scale = crop.zoom * stageZoomFactor;
+
+  // start drawing
+  const ctx = canvas.getContext('2d');
+
+  // move to draw offset
+  ctx.translate(canvasCenter.x, canvasCenter.y);
+  ctx.rotate(crop.rotation);
+  ctx.scale(scale, scale);
+
+  // draw the image
+  ctx.drawImage(
+    bitmap,
+    imageOffset.x - canvasCenter.x,
+    imageOffset.y - canvasCenter.y,
+    imageSize.width,
+    imageSize.height
+  );
+
+  // get data from canvas
+  return ctx.getImageData(0, 0, canvas.width, canvas.height);
 };
+
+const cropSVG = (file, crop) =>
+  new Promise((resolve, reject) => {
+    // load file contents and wrap in crop svg
+    const fr = new FileReader();
+    fr.onloadend = () => {
+      // get svg text
+      const text = fr.result;
+
+      // create element with svg and get size
+      const original = document.createElement('div');
+      original.style.cssText = `position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;`;
+      original.innerHTML = text;
+      const originalNode = original.querySelector('svg');
+      document.body.appendChild(original);
+
+      // request bounding box dimensions
+      const bBox = originalNode.getBBox();
+      original.parentNode.removeChild(original);
+
+      // get title
+      const titleNode = original.querySelector('title');
+
+      // calculate new heights and widths
+      const viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
+      const widthAttribute = originalNode.getAttribute('width') || '';
+      const heightAttribute = originalNode.getAttribute('height') || '';
+      let width = parseFloat(widthAttribute) || null;
+      let height = parseFloat(heightAttribute) || null;
+      const widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
+      const heightUnits = (heightAttribute.match(/[a-z]+/) || [])[0] || '';
+
+      // create new size
+      const viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
+      const viewBox = viewBoxList.length
+        ? {
+            x: viewBoxList[0],
+            y: viewBoxList[1],
+            width: viewBoxList[2],
+            height: viewBoxList[3]
+          }
+        : bBox;
+
+      let imageWidth = width != null ? width : viewBox.width;
+      let imageHeight = height != null ? height : viewBox.height;
+
+      originalNode.style.overflow = 'visible';
+      originalNode.setAttribute('width', imageWidth);
+      originalNode.setAttribute('height', imageHeight);
+
+      const aspectRatio = crop.aspectRatio || imageHeight / imageWidth;
+
+      const canvasWidth = imageWidth;
+      const canvasHeight = canvasWidth * aspectRatio;
+
+      const canvasZoomFactor = getImageRectZoomFactor(
+        {
+          width: imageWidth,
+          height: imageHeight
+        },
+        getCenteredCropRect(
+          {
+            width: canvasWidth,
+            height: canvasHeight
+          },
+          aspectRatio
+        ),
+        crop.rotation,
+        crop.center
+      );
+
+      const scale = crop.zoom * canvasZoomFactor;
+
+      const rotation = crop.rotation * (180 / Math.PI);
+
+      const canvasCenter = {
+        x: canvasWidth * 0.5,
+        y: canvasHeight * 0.5
+      };
+
+      const imageOffset = {
+        x: canvasCenter.x - imageWidth * crop.center.x,
+        y: canvasCenter.y - imageHeight * crop.center.y
+      };
+
+      const cropTransforms = [
+        // rotate
+        `rotate(${rotation} ${canvasCenter.x} ${canvasCenter.y})`,
+
+        // scale
+        `translate(${canvasCenter.x} ${canvasCenter.y})`,
+        `scale(${scale})`,
+        `translate(${-canvasCenter.x} ${-canvasCenter.y})`,
+
+        // offset
+        `translate(${imageOffset.x} ${imageOffset.y})`
+      ];
+
+      const flipTransforms = [
+        `scale(${crop.flip.horizontal ? -1 : 1} ${
+          crop.flip.vertical ? -1 : 1
+        })`,
+        `translate(${crop.flip.horizontal ? -imageWidth : 0} ${
+          crop.flip.vertical ? -imageHeight : 0
+        })`
+      ];
+
+      // crop
+      const transformed = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${canvasWidth}${widthUnits}" height="${canvasHeight}${heightUnits}" 
+viewBox="0 0 ${canvasWidth} ${canvasHeight}" 
+preserveAspectRatio="xMinYMin"
+xmlns="http://www.w3.org/2000/svg">
+<!-- Generator: FilePond Image Transform Plugin - https://pqina.nl/filepond -->
+<title>${titleNode ? titleNode.textContent : file.name}</title>
+<desc>Cropped with FilePond.</desc>
+<g transform="${cropTransforms.join(' ')}">
+<g transform="${flipTransforms.join(' ')}">
+${originalNode.outerHTML}
+</g>
+</g>
+</svg>`;
+
+      // create new svg file
+      resolve(transformed);
+    };
+
+    fr.readAsText(file);
+  });
 
 const imageDataToBlob = (imageData, options) =>
   new Promise((resolve, reject) => {
@@ -353,81 +656,10 @@ var plugin$1 = _ => {
             return resolve(file);
           }
 
-          // load file contents and wrap in crop svg
-          const fr = new FileReader();
-          fr.onloadend = () => {
-            // create element with svg and get size
-            const original = document.createElement('div');
-            original.style.cssText = `position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;`;
-            original.innerHTML = fr.result;
-            const originalNode = original.querySelector('svg');
-            document.body.appendChild(original);
+          cropSVG(file, crop).then(text => {
+            resolve(renameFile(createBlob(text, 'image/svg+xml'), file.name));
+          });
 
-            // request bounding box dimensions
-            const bBox = originalNode.getBBox();
-            original.parentNode.removeChild(original);
-
-            // calculate new heights and widths
-            const viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
-            const widthAttribute = originalNode.getAttribute('width') || '';
-            const heightAttribute = originalNode.getAttribute('height') || '';
-            let width = parseFloat(widthAttribute) || null;
-            let height = parseFloat(heightAttribute) || null;
-            const widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
-            const heightUnits =
-              (heightAttribute.match(/[a-z]+/) || [])[0] || '';
-
-            // remove width and height of original
-            originalNode.removeAttribute('width');
-            originalNode.removeAttribute('height');
-            const source = originalNode.outerHTML;
-
-            // create new size
-            const viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
-            const viewBox = viewBoxList.length
-              ? {
-                  x: viewBoxList[0],
-                  y: viewBoxList[1],
-                  width: viewBoxList[2],
-                  height: viewBoxList[3]
-                }
-              : bBox;
-
-            if (!width) {
-              width = viewBox.width;
-            }
-
-            if (!height) {
-              height = viewBox.height;
-            }
-
-            // target
-            const targetWidth = `width="${width *
-              crop.rect.width}${widthUnits}"`;
-            const targetHeight = `height="${height *
-              crop.rect.height}${heightUnits}"`;
-            const translate = {
-              x: width * -crop.rect.x,
-              y: height * -crop.rect.y
-            };
-
-            // crop
-            const transformed = `<?xml version="1.0" encoding="UTF-8"?>
-<svg ${targetWidth} ${targetHeight} 
-  viewBox="0 0 ${width} ${height}" 
-  preserveAspectRatio="xMinYMin slice"
-  xmlns="http://www.w3.org/2000/svg">
-  <g transform="translate(${translate.x}, ${translate.y})">
-    ${source}
-  </g>
-</svg>`;
-
-            // create new svg file
-            resolve(
-              renameFile(createBlob(transformed, 'image/svg+xml'), file.name)
-            );
-          };
-          fr.readAsText(file);
           return;
         }
 
@@ -441,11 +673,7 @@ var plugin$1 = _ => {
             (item.getMetadata('exif') || {}).orientation || -1;
 
           // draw to canvas and start transform chain
-          const imageData = imageToImageData(
-            image,
-            crop ? crop.rect : null,
-            orientation
-          );
+          const imageData = imageToImageData(image, orientation, crop);
 
           // no further transforms, we done!
           if (!transforms.length) {
@@ -500,8 +728,10 @@ var plugin$1 = _ => {
   };
 };
 
-if (typeof navigator !== 'undefined' && document) {
-  // plugin has loaded
+const isBrowser =
+  typeof window !== 'undefined' && typeof window.document !== 'undefined';
+
+if (isBrowser && document) {
   document.dispatchEvent(
     new CustomEvent('FilePond:pluginloaded', { detail: plugin$1 })
   );
