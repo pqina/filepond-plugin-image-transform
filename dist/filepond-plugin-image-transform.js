@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.0
+ * FilePondPluginImageTransform 3.0.1
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -137,10 +137,15 @@
 
   var getImageRectZoomFactor = function getImageRectZoomFactor(
     imageRect,
-    cropRect,
-    rotation,
-    center
+    cropRect
   ) {
+    var rotation =
+      arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 0;
+    var center =
+      arguments.length > 3 && arguments[3] !== undefined
+        ? arguments[3]
+        : { x: 0.5, y: 0.5 };
+
     // calculate available space round image center position
     var cx = center.x > 0.5 ? 1 - center.x : center.x;
     var cy = center.y > 0.5 ? 1 - center.y : center.y;
@@ -180,9 +185,11 @@
 
   var calculateCanvasSize = function calculateCanvasSize(
     image,
-    canvasAspectRatio,
-    zoom
+    canvasAspectRatio
   ) {
+    var zoom =
+      arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 1;
+
     var imageAspectRatio = image.height / image.width;
 
     // determine actual pixels on x and y axis
@@ -207,7 +214,7 @@
   };
 
   var isFlipped = function isFlipped(flip) {
-    return flip.horizontal || flip.vertical;
+    return flip && (flip.horizontal || flip.vertical);
   };
 
   var getBitmap = function getBitmap(image, orientation, flip) {
@@ -249,11 +256,10 @@
     return canvas;
   };
 
-  var imageToImageData = function imageToImageData(
-    imageElement,
-    orientation,
-    crop
-  ) {
+  var imageToImageData = function imageToImageData(imageElement, orientation) {
+    var crop =
+      arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+
     // fixes possible image orientation problems by drawing the image on the correct canvas
     var bitmap = getBitmap(imageElement, orientation, crop.flip);
     var imageSize = {
@@ -273,8 +279,8 @@
     };
 
     var imageOffset = {
-      x: canvasCenter.x - imageSize.width * crop.center.x,
-      y: canvasCenter.y - imageSize.height * crop.center.y
+      x: canvasCenter.x - imageSize.width * (crop.center ? crop.center.x : 0.5),
+      y: canvasCenter.y - imageSize.height * (crop.center ? crop.center.y : 0.5)
     };
 
     var stage = {
@@ -292,14 +298,14 @@
       crop.center
     );
 
-    var scale = crop.zoom * stageZoomFactor;
+    var scale = (crop.zoom || 1) * stageZoomFactor;
 
     // start drawing
     var ctx = canvas.getContext('2d');
 
     // move to draw offset
     ctx.translate(canvasCenter.x, canvasCenter.y);
-    ctx.rotate(crop.rotation);
+    ctx.rotate(crop.rotation || 0);
     ctx.scale(scale, scale);
 
     // draw the image

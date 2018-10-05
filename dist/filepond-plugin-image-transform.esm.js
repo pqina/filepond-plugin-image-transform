@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.0
+ * FilePondPluginImageTransform 3.0.1
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -80,7 +80,12 @@ const getRotatedRectSize = (rect, rotation) => {
   };
 };
 
-const getImageRectZoomFactor = (imageRect, cropRect, rotation, center) => {
+const getImageRectZoomFactor = (
+  imageRect,
+  cropRect,
+  rotation = 0,
+  center = { x: 0.5, y: 0.5 }
+) => {
   // calculate available space round image center position
   const cx = center.x > 0.5 ? 1 - center.x : center.x;
   const cy = center.y > 0.5 ? 1 - center.y : center.y;
@@ -115,7 +120,7 @@ const getCenteredCropRect = (container, aspectRatio) => {
   };
 };
 
-const calculateCanvasSize = (image, canvasAspectRatio, zoom) => {
+const calculateCanvasSize = (image, canvasAspectRatio, zoom = 1) => {
   const imageAspectRatio = image.height / image.width;
 
   // determine actual pixels on x and y axis
@@ -139,7 +144,7 @@ const calculateCanvasSize = (image, canvasAspectRatio, zoom) => {
   };
 };
 
-const isFlipped = flip => flip.horizontal || flip.vertical;
+const isFlipped = flip => flip && (flip.horizontal || flip.vertical);
 
 const getBitmap = (image, orientation, flip) => {
   if (!orientation && !isFlipped(flip)) {
@@ -180,7 +185,7 @@ const getBitmap = (image, orientation, flip) => {
   return canvas;
 };
 
-const imageToImageData = (imageElement, orientation, crop) => {
+const imageToImageData = (imageElement, orientation, crop = {}) => {
   // fixes possible image orientation problems by drawing the image on the correct canvas
   const bitmap = getBitmap(imageElement, orientation, crop.flip);
   const imageSize = {
@@ -200,8 +205,8 @@ const imageToImageData = (imageElement, orientation, crop) => {
   };
 
   const imageOffset = {
-    x: canvasCenter.x - imageSize.width * crop.center.x,
-    y: canvasCenter.y - imageSize.height * crop.center.y
+    x: canvasCenter.x - imageSize.width * (crop.center ? crop.center.x : 0.5),
+    y: canvasCenter.y - imageSize.height * (crop.center ? crop.center.y : 0.5)
   };
 
   const stage = {
@@ -219,14 +224,14 @@ const imageToImageData = (imageElement, orientation, crop) => {
     crop.center
   );
 
-  const scale = crop.zoom * stageZoomFactor;
+  const scale = (crop.zoom || 1) * stageZoomFactor;
 
   // start drawing
   const ctx = canvas.getContext('2d');
 
   // move to draw offset
   ctx.translate(canvasCenter.x, canvasCenter.y);
-  ctx.rotate(crop.rotation);
+  ctx.rotate(crop.rotation || 0);
   ctx.scale(scale, scale);
 
   // draw the image
