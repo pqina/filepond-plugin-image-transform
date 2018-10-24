@@ -1,8 +1,10 @@
 /*
- * FilePondPluginImageTransform 3.0.1
+ * FilePondPluginImageTransform 3.0.2
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
+
+/* eslint-disable */
 // test if file is of type image
 const isImage = file => /^image/.test(file.type);
 
@@ -590,7 +592,8 @@ var plugin$1 = _ => {
         if (
           !isFile(file) ||
           !isImage(file) ||
-          !query('GET_ALLOW_IMAGE_TRANSFORM')
+          !query('GET_ALLOW_IMAGE_TRANSFORM') ||
+          item.archived
         ) {
           return resolve(file);
         }
@@ -673,6 +676,11 @@ var plugin$1 = _ => {
           // url is no longer needed
           URL.revokeObjectURL(url);
 
+          // exit if was archived in the mean time
+          if (item.archived) {
+            return resolve(file);
+          }
+
           // get exif orientation
           const orientation =
             (item.getMetadata('exif') || {}).orientation || -1;
@@ -697,6 +705,11 @@ var plugin$1 = _ => {
               imageData
             },
             response => {
+              // exit if was archived in the mean time
+              if (item.archived) {
+                return resolve(file);
+              }
+
               // finish up
               toBlob(objectToImageData(response), {
                 quality,
