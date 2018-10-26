@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.2
+ * FilePondPluginImageTransform 3.0.3
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -19,18 +19,7 @@
     return /^image/.test(file.type);
   };
 
-  var toConsumableArray = function(arr) {
-    if (Array.isArray(arr)) {
-      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++)
-        arr2[i] = arr[i];
-
-      return arr2;
-    } else {
-      return Array.from(arr);
-    }
-  };
-
-  var transforms = {
+  var MATRICES = {
     1: function _() {
       return [1, 0, 0, 1, 0, 0];
     },
@@ -57,21 +46,15 @@
     }
   };
 
-  var fixImageOrientation = function fixImageOrientation(
-    ctx,
+  var getImageOrientationMatrix = function getImageOrientationMatrix(
     width,
     height,
     orientation
   ) {
-    // no orientation supplied
     if (orientation === -1) {
-      return;
+      orientation = 1;
     }
-
-    ctx.transform.apply(
-      ctx,
-      toConsumableArray(transforms[orientation](width, height))
-    );
+    return MATRICES[orientation](width, height);
   };
 
   var createVector = function createVector(x, y) {
@@ -185,6 +168,17 @@
     };
   };
 
+  var toConsumableArray = function(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++)
+        arr2[i] = arr[i];
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  };
+
   var calculateCanvasSize = function calculateCanvasSize(
     image,
     canvasAspectRatio
@@ -231,7 +225,8 @@
     var height = image.naturalHeight;
 
     // if is rotated incorrectly swap width and height
-    if (orientation >= 5 && orientation <= 8) {
+    var swapped = orientation >= 5 && orientation <= 8;
+    if (swapped) {
       canvas.width = height;
       canvas.height = width;
     } else {
@@ -241,16 +236,32 @@
 
     // draw the image but first fix orientation and set correct flip
     var ctx = canvas.getContext('2d');
+
+    // get base transformation matrix
     if (orientation) {
-      ctx.save();
-      fixImageOrientation(ctx, width, height, orientation);
-      ctx.restore();
+      ctx.transform.apply(
+        ctx,
+        toConsumableArray(getImageOrientationMatrix(width, height, orientation))
+      );
     }
 
     if (isFlipped(flip)) {
-      ctx.translate(canvas.width * 0.5, canvas.height * 0.5);
-      ctx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1);
-      ctx.translate(-canvas.width * 0.5, -canvas.height * 0.5);
+      // flip horizontal
+      // [-1, 0, 0, 1, width, 0]
+      var matrix = [1, 0, 0, 1, 0, 0];
+      if ((!swapped && flip.horizontal) || swapped & flip.vertical) {
+        matrix[0] = -1;
+        matrix[4] = width;
+      }
+
+      // flip vertical
+      // [1, 0, 0, -1, 0, height]
+      if ((!swapped && flip.vertical) || (swapped && flip.horizontal)) {
+        matrix[3] = -1;
+        matrix[5] = height;
+      }
+
+      ctx.transform.apply(ctx, matrix);
     }
 
     ctx.drawImage(image, 0, 0, width, height);
@@ -762,9 +773,6 @@
             });
         };
 
-        // get file url
-        var url = URL.createObjectURL(file);
-
         // if this is an svg and we want it to stay an svg
         if (/svg/.test(file.type) && type === null) {
           // no cropping? Done (as the SVG is vector data we're not resizing it)
@@ -778,6 +786,9 @@
 
           return;
         }
+
+        // get file url
+        var url = URL.createObjectURL(file);
 
         // turn the file into an image
         loadImage(url).then(function(image) {

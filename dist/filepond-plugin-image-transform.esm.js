@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.2
+ * FilePondPluginImageTransform 3.0.3
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -8,7 +8,7 @@
 // test if file is of type image
 const isImage = file => /^image/.test(file.type);
 
-const transforms = {
+const MATRICES = {
   1: () => [1, 0, 0, 1, 0, 0],
   2: width => [-1, 0, 0, 1, width, 0],
   3: (width, height) => [-1, 0, 0, -1, width, height],
@@ -19,13 +19,11 @@ const transforms = {
   8: width => [0, -1, 1, 0, 0, width]
 };
 
-const fixImageOrientation = (ctx, width, height, orientation) => {
-  // no orientation supplied
+const getImageOrientationMatrix = (width, height, orientation) => {
   if (orientation === -1) {
-    return;
+    orientation = 1;
   }
-
-  ctx.transform(...transforms[orientation](width, height));
+  return MATRICES[orientation](width, height);
 };
 
 const createVector = (x, y) => ({ x, y });
@@ -160,7 +158,8 @@ const getBitmap = (image, orientation, flip) => {
   const height = image.naturalHeight;
 
   // if is rotated incorrectly swap width and height
-  if (orientation >= 5 && orientation <= 8) {
+  const swapped = orientation >= 5 && orientation <= 8;
+  if (swapped) {
     canvas.width = height;
     canvas.height = width;
   } else {
@@ -170,16 +169,29 @@ const getBitmap = (image, orientation, flip) => {
 
   // draw the image but first fix orientation and set correct flip
   const ctx = canvas.getContext('2d');
+
+  // get base transformation matrix
   if (orientation) {
-    ctx.save();
-    fixImageOrientation(ctx, width, height, orientation);
-    ctx.restore();
+    ctx.transform(...getImageOrientationMatrix(width, height, orientation));
   }
 
   if (isFlipped(flip)) {
-    ctx.translate(canvas.width * 0.5, canvas.height * 0.5);
-    ctx.scale(flip.horizontal ? -1 : 1, flip.vertical ? -1 : 1);
-    ctx.translate(-canvas.width * 0.5, -canvas.height * 0.5);
+    // flip horizontal
+    // [-1, 0, 0, 1, width, 0]
+    const matrix = [1, 0, 0, 1, 0, 0];
+    if ((!swapped && flip.horizontal) || swapped & flip.vertical) {
+      matrix[0] = -1;
+      matrix[4] = width;
+    }
+
+    // flip vertical
+    // [1, 0, 0, -1, 0, height]
+    if ((!swapped && flip.vertical) || (swapped && flip.horizontal)) {
+      matrix[3] = -1;
+      matrix[5] = height;
+    }
+
+    ctx.transform(...matrix);
   }
 
   ctx.drawImage(image, 0, 0, width, height);
@@ -654,9 +666,6 @@ var plugin$1 = _ => {
             });
         };
 
-        // get file url
-        const url = URL.createObjectURL(file);
-
         // if this is an svg and we want it to stay an svg
         if (/svg/.test(file.type) && type === null) {
           // no cropping? Done (as the SVG is vector data we're not resizing it)
@@ -670,6 +679,9 @@ var plugin$1 = _ => {
 
           return;
         }
+
+        // get file url
+        const url = URL.createObjectURL(file);
 
         // turn the file into an image
         loadImage(url).then(image => {
