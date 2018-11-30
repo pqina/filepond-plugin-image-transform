@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.3
+ * FilePondPluginImageTransform 3.0.4
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -675,8 +675,16 @@
       renameFile = utils.renameFile,
       isFile = utils.isFile;
 
-    // renames the output file to match the format
+    // if is not async should prepare now
 
+    addFilter('SHOULD_PREPARE_OUTPUT', function(shouldPrepareOutput, _ref) {
+      var query = _ref.query;
+      return new Promise(function(resolve) {
+        resolve(!query('IS_ASYNC'));
+      });
+    });
+
+    // renames the output file to match the format
     var renameFileToMatchMimeType = function renameFileToMatchMimeType(
       filename,
       format
@@ -700,9 +708,9 @@
     var transformOrder = ['resize'];
 
     // subscribe to file transformations
-    addFilter('PREPARE_OUTPUT', function(file, _ref) {
-      var query = _ref.query,
-        item = _ref.item;
+    addFilter('PREPARE_OUTPUT', function(file, _ref2) {
+      var query = _ref2.query,
+        item = _ref2.item;
       return new Promise(function(resolve, reject) {
         // if the file is not an image we do not have any business transforming it
         if (

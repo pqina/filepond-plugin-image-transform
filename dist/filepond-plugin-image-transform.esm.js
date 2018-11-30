@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.3
+ * FilePondPluginImageTransform 3.0.4
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -574,6 +574,15 @@ var plugin$1 = _ => {
     renameFile,
     isFile
   } = utils;
+
+  // if is not async should prepare now
+  addFilter(
+    'SHOULD_PREPARE_OUTPUT',
+    (shouldPrepareOutput, { query, item }) =>
+      new Promise(resolve => {
+        resolve(!query('IS_ASYNC'));
+      })
+  );
 
   // renames the output file to match the format
   const renameFileToMatchMimeType = (filename, format) => {
