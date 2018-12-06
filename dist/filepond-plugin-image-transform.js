@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.4
+ * FilePondPluginImageTransform 3.1.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -638,6 +638,76 @@
     }
   };
 
+  var correctOrientation = function correctOrientation(view, offset, length) {
+    // Missing 0x45786966 Marker? No Exif Header, stop here
+    if (view.getUint32(offset + 4, false) !== 0x45786966) return;
+
+    // next byte!
+    offset += 4;
+
+    // First 2bytes defines byte align of TIFF data.
+    // If it is 0x4949="I I", it means "Intel" type byte align
+    var intelByteAligned = view.getUint16((offset += 6), false) === 0x4949;
+    offset += view.getUint32(offset + 4, intelByteAligned);
+
+    var tags = view.getUint16(offset, intelByteAligned);
+    offset += 2;
+
+    // find Orientation tag
+    for (var i = 0; i < tags; i++) {
+      if (view.getUint16(offset + i * 12, intelByteAligned) === 0x0112) {
+        view.setUint16(offset + i * 12 + 8, 1, intelByteAligned);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  var readData = function readData(data) {
+    var view = new DataView(data);
+
+    // Every JPEG file starts from binary value '0xFFD8'
+    // If it's not present, exit here
+    if (view.getUint16(0) !== 0xffd8) return null;
+
+    var offset = 2; // Start at 2 as we skipped two bytes (FFD8)
+    var marker = void 0;
+    var markerLength = void 0;
+    var orientationCorrected = false;
+
+    while (offset < view.byteLength) {
+      marker = view.getUint16(offset, false);
+      markerLength = view.getUint16(offset + 2, false) + 2;
+
+      // Test if is APP and COM markers
+      var isData = (marker >= 0xffe0 && marker <= 0xffef) || marker === 0xfffe;
+      if (!isData) {
+        break;
+      }
+
+      if (!orientationCorrected) {
+        orientationCorrected = correctOrientation(view, offset, markerLength);
+      }
+
+      if (offset + markerLength > view.byteLength) {
+        break;
+      }
+
+      offset += markerLength;
+    }
+    return data.slice(0, offset);
+  };
+
+  var getImageHead = function getImageHead(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() {
+        return resolve(readData(reader.result) || null);
+      };
+      reader.readAsArrayBuffer(file.slice(0, 256 * 1024));
+    });
+  };
+
   /**
    * Polyfill Edge and IE
    */
@@ -762,19 +832,33 @@
 
         // done
         var toBlob = function toBlob(imageData, options) {
+          var blobToFile = function blobToFile(blob) {
+            // transform to file
+            var transformedFile = getFileFromBlob(
+              blob,
+              renameFileToMatchMimeType(file.name, getOutputMimeType(blob.type))
+            );
+
+            // we done!
+            resolve(transformedFile);
+          };
+
           imageDataToBlob(imageData, options)
             .then(function(blob) {
-              // transform to file
-              var transformedFile = getFileFromBlob(
-                blob,
-                renameFileToMatchMimeType(
-                  file.name,
-                  getOutputMimeType(blob.type)
-                )
-              );
+              if (!query('GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD')) {
+                getImageHead(file).then(function(imageHead) {
+                  // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+                  if (imageHead !== null) {
+                    blob = new Blob([imageHead, blob.slice(20)], {
+                      type: blob.type
+                    });
+                  }
 
-              // we done!
-              resolve(transformedFile);
+                  blobToFile(blob);
+                });
+              } else {
+                blobToFile(blob);
+              }
             })
             .catch(function(error) {
               console.error(error);
@@ -861,6 +945,9 @@
 
         // null, 0 - 100
         imageTransformOutputQuality: [null, Type.INT],
+
+        // set to false to copy image exif data to output
+        imageTransformOutputStripImageHead: [true, Type.BOOLEAN],
 
         // only apply output quality when a transform is required
         imageTransformOutputQualityMode: ['always', Type.STRING]

@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.0.4
+ * FilePondPluginImageTransform 3.1.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -537,6 +537,73 @@ const TransformWorker = () => {
   }
 };
 
+const correctOrientation = (view, offset, length) => {
+  // Missing 0x45786966 Marker? No Exif Header, stop here
+  if (view.getUint32(offset + 4, false) !== 0x45786966) return;
+
+  // next byte!
+  offset += 4;
+
+  // First 2bytes defines byte align of TIFF data.
+  // If it is 0x4949="I I", it means "Intel" type byte align
+  const intelByteAligned = view.getUint16((offset += 6), false) === 0x4949;
+  offset += view.getUint32(offset + 4, intelByteAligned);
+
+  const tags = view.getUint16(offset, intelByteAligned);
+  offset += 2;
+
+  // find Orientation tag
+  for (let i = 0; i < tags; i++) {
+    if (view.getUint16(offset + i * 12, intelByteAligned) === 0x0112) {
+      view.setUint16(offset + i * 12 + 8, 1, intelByteAligned);
+      return true;
+    }
+  }
+  return false;
+};
+
+const readData = data => {
+  const view = new DataView(data);
+
+  // Every JPEG file starts from binary value '0xFFD8'
+  // If it's not present, exit here
+  if (view.getUint16(0) !== 0xffd8) return null;
+
+  let offset = 2; // Start at 2 as we skipped two bytes (FFD8)
+  let marker;
+  let markerLength;
+  let orientationCorrected = false;
+
+  while (offset < view.byteLength) {
+    marker = view.getUint16(offset, false);
+    markerLength = view.getUint16(offset + 2, false) + 2;
+
+    // Test if is APP and COM markers
+    const isData = (marker >= 0xffe0 && marker <= 0xffef) || marker === 0xfffe;
+    if (!isData) {
+      break;
+    }
+
+    if (!orientationCorrected) {
+      orientationCorrected = correctOrientation(view, offset, markerLength);
+    }
+
+    if (offset + markerLength > view.byteLength) {
+      break;
+    }
+
+    offset += markerLength;
+  }
+  return data.slice(0, offset);
+};
+
+const getImageHead = file =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(readData(reader.result) || null);
+    reader.readAsArrayBuffer(file.slice(0, 256 * 1024));
+  });
+
 /**
  * Polyfill Edge and IE
  */
@@ -656,19 +723,33 @@ var plugin$1 = _ => {
 
         // done
         const toBlob = (imageData, options) => {
+          const blobToFile = blob => {
+            // transform to file
+            const transformedFile = getFileFromBlob(
+              blob,
+              renameFileToMatchMimeType(file.name, getOutputMimeType(blob.type))
+            );
+
+            // we done!
+            resolve(transformedFile);
+          };
+
           imageDataToBlob(imageData, options)
             .then(blob => {
-              // transform to file
-              const transformedFile = getFileFromBlob(
-                blob,
-                renameFileToMatchMimeType(
-                  file.name,
-                  getOutputMimeType(blob.type)
-                )
-              );
+              if (!query('GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD')) {
+                getImageHead(file).then(imageHead => {
+                  // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+                  if (imageHead !== null) {
+                    blob = new Blob([imageHead, blob.slice(20)], {
+                      type: blob.type
+                    });
+                  }
 
-              // we done!
-              resolve(transformedFile);
+                  blobToFile(blob);
+                });
+              } else {
+                blobToFile(blob);
+              }
             })
             .catch(error => {
               console.error(error);
@@ -756,6 +837,9 @@ var plugin$1 = _ => {
 
       // null, 0 - 100
       imageTransformOutputQuality: [null, Type.INT],
+
+      // set to false to copy image exif data to output
+      imageTransformOutputStripImageHead: [true, Type.BOOLEAN],
 
       // only apply output quality when a transform is required
       imageTransformOutputQualityMode: ['always', Type.STRING]
