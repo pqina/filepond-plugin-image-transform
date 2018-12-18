@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.1.0
+ * FilePondPluginImageTransform 3.2.0
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -7,24 +7,6 @@
 /* eslint-disable */
 // test if file is of type image
 const isImage = file => /^image/.test(file.type);
-
-const MATRICES = {
-  1: () => [1, 0, 0, 1, 0, 0],
-  2: width => [-1, 0, 0, 1, width, 0],
-  3: (width, height) => [-1, 0, 0, -1, width, height],
-  4: (width, height) => [1, 0, 0, -1, 0, height],
-  5: () => [0, 1, 1, 0, 0, 0],
-  6: (width, height) => [0, 1, -1, 0, height, 0],
-  7: (width, height) => [0, -1, -1, 0, height, width],
-  8: width => [0, -1, 1, 0, 0, width]
-};
-
-const getImageOrientationMatrix = (width, height, orientation) => {
-  if (orientation === -1) {
-    orientation = 1;
-  }
-  return MATRICES[orientation](width, height);
-};
 
 const createVector = (x, y) => ({ x, y });
 
@@ -120,6 +102,164 @@ const getCenteredCropRect = (container, aspectRatio) => {
   };
 };
 
+const createSVGTransform = ({ createBlob, renameFile }) => {
+  return (item, file, transforms) =>
+    new Promise((resolve, reject) => {
+      // check if should crop, if not, we done!
+      const crop = (transforms.find(t => t.type === 'crop') || {}).data;
+      if (!crop) return resolve(file);
+
+      // load file contents and wrap in crop svg
+      const fr = new FileReader();
+      fr.onloadend = () => {
+        // exit if was archived in the mean time
+        if (item.archived) return resolve(file);
+
+        // get svg text
+        const text = fr.result;
+
+        // create element with svg and get size
+        const original = document.createElement('div');
+        original.style.cssText = `position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;`;
+        original.innerHTML = text;
+        const originalNode = original.querySelector('svg');
+        document.body.appendChild(original);
+
+        // request bounding box dimensions
+        const bBox = originalNode.getBBox();
+        original.parentNode.removeChild(original);
+
+        // get title
+        const titleNode = original.querySelector('title');
+
+        // calculate new heights and widths
+        const viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
+        const widthAttribute = originalNode.getAttribute('width') || '';
+        const heightAttribute = originalNode.getAttribute('height') || '';
+        let width = parseFloat(widthAttribute) || null;
+        let height = parseFloat(heightAttribute) || null;
+        const widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
+        const heightUnits = (heightAttribute.match(/[a-z]+/) || [])[0] || '';
+
+        // create new size
+        const viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
+        const viewBox = viewBoxList.length
+          ? {
+              x: viewBoxList[0],
+              y: viewBoxList[1],
+              width: viewBoxList[2],
+              height: viewBoxList[3]
+            }
+          : bBox;
+
+        let imageWidth = width != null ? width : viewBox.width;
+        let imageHeight = height != null ? height : viewBox.height;
+
+        originalNode.style.overflow = 'visible';
+        originalNode.setAttribute('width', imageWidth);
+        originalNode.setAttribute('height', imageHeight);
+
+        const aspectRatio = crop.aspectRatio || imageHeight / imageWidth;
+
+        const canvasWidth = imageWidth;
+        const canvasHeight = canvasWidth * aspectRatio;
+
+        const canvasZoomFactor = getImageRectZoomFactor(
+          {
+            width: imageWidth,
+            height: imageHeight
+          },
+          getCenteredCropRect(
+            {
+              width: canvasWidth,
+              height: canvasHeight
+            },
+            aspectRatio
+          ),
+          crop.rotation,
+          crop.center
+        );
+
+        const scale = crop.zoom * canvasZoomFactor;
+
+        const rotation = crop.rotation * (180 / Math.PI);
+
+        const canvasCenter = {
+          x: canvasWidth * 0.5,
+          y: canvasHeight * 0.5
+        };
+
+        const imageOffset = {
+          x: canvasCenter.x - imageWidth * crop.center.x,
+          y: canvasCenter.y - imageHeight * crop.center.y
+        };
+
+        const cropTransforms = [
+          // rotate
+          `rotate(${rotation} ${canvasCenter.x} ${canvasCenter.y})`,
+
+          // scale
+          `translate(${canvasCenter.x} ${canvasCenter.y})`,
+          `scale(${scale})`,
+          `translate(${-canvasCenter.x} ${-canvasCenter.y})`,
+
+          // offset
+          `translate(${imageOffset.x} ${imageOffset.y})`
+        ];
+
+        const flipTransforms = [
+          `scale(${crop.flip.horizontal ? -1 : 1} ${
+            crop.flip.vertical ? -1 : 1
+          })`,
+          `translate(${crop.flip.horizontal ? -imageWidth : 0} ${
+            crop.flip.vertical ? -imageHeight : 0
+          })`
+        ];
+
+        // crop
+        const transformed = `<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${canvasWidth}${widthUnits}" height="${canvasHeight}${heightUnits}" 
+viewBox="0 0 ${canvasWidth} ${canvasHeight}" 
+preserveAspectRatio="xMinYMin"
+xmlns="http://www.w3.org/2000/svg">
+<!-- Generator: FilePond Image Transform Plugin - https://pqina.nl/filepond -->
+<title>${titleNode ? titleNode.textContent : file.name}</title>
+<desc>Cropped with FilePond.</desc>
+<g transform="${cropTransforms.join(' ')}">
+<g transform="${flipTransforms.join(' ')}">
+${originalNode.outerHTML}
+</g>
+</g>
+</svg>`;
+
+        // create new svg file
+        resolve(
+          renameFile(createBlob(transformed, 'image/svg+xml'), file.name)
+        );
+      };
+
+      fr.readAsText(file);
+    });
+};
+
+const MATRICES = {
+  1: () => [1, 0, 0, 1, 0, 0],
+  2: width => [-1, 0, 0, 1, width, 0],
+  3: (width, height) => [-1, 0, 0, -1, width, height],
+  4: (width, height) => [1, 0, 0, -1, 0, height],
+  5: () => [0, 1, 1, 0, 0, 0],
+  6: (width, height) => [0, 1, -1, 0, height, 0],
+  7: (width, height) => [0, -1, -1, 0, height, width],
+  8: width => [0, -1, 1, 0, 0, width]
+};
+
+const getImageOrientationMatrix = (width, height, orientation) => {
+  if (orientation === -1) {
+    orientation = 1;
+  }
+  return MATRICES[orientation](width, height);
+};
+
 const calculateCanvasSize = (image, canvasAspectRatio, zoom = 1) => {
   const imageAspectRatio = image.height / image.width;
 
@@ -199,7 +339,12 @@ const getBitmap = (image, orientation, flip) => {
   return canvas;
 };
 
-const imageToImageData = (imageElement, orientation, crop = {}) => {
+const imageToImageData = (imageElement, orientation, crop) => {
+  // set default value for crop
+  if (!crop) {
+    crop = {};
+  }
+
   // fixes possible image orientation problems by drawing the image on the correct canvas
   const bitmap = getBitmap(imageElement, orientation, crop.flip);
   const imageSize = {
@@ -261,145 +406,6 @@ const imageToImageData = (imageElement, orientation, crop = {}) => {
   return ctx.getImageData(0, 0, canvas.width, canvas.height);
 };
 
-const cropSVG = (file, crop) =>
-  new Promise((resolve, reject) => {
-    // load file contents and wrap in crop svg
-    const fr = new FileReader();
-    fr.onloadend = () => {
-      // get svg text
-      const text = fr.result;
-
-      // create element with svg and get size
-      const original = document.createElement('div');
-      original.style.cssText = `position:absolute;pointer-events:none;width:0;height:0;visibility:hidden;`;
-      original.innerHTML = text;
-      const originalNode = original.querySelector('svg');
-      document.body.appendChild(original);
-
-      // request bounding box dimensions
-      const bBox = originalNode.getBBox();
-      original.parentNode.removeChild(original);
-
-      // get title
-      const titleNode = original.querySelector('title');
-
-      // calculate new heights and widths
-      const viewBoxAttribute = originalNode.getAttribute('viewBox') || '';
-      const widthAttribute = originalNode.getAttribute('width') || '';
-      const heightAttribute = originalNode.getAttribute('height') || '';
-      let width = parseFloat(widthAttribute) || null;
-      let height = parseFloat(heightAttribute) || null;
-      const widthUnits = (widthAttribute.match(/[a-z]+/) || [])[0] || '';
-      const heightUnits = (heightAttribute.match(/[a-z]+/) || [])[0] || '';
-
-      // create new size
-      const viewBoxList = viewBoxAttribute.split(' ').map(parseFloat);
-      const viewBox = viewBoxList.length
-        ? {
-            x: viewBoxList[0],
-            y: viewBoxList[1],
-            width: viewBoxList[2],
-            height: viewBoxList[3]
-          }
-        : bBox;
-
-      let imageWidth = width != null ? width : viewBox.width;
-      let imageHeight = height != null ? height : viewBox.height;
-
-      originalNode.style.overflow = 'visible';
-      originalNode.setAttribute('width', imageWidth);
-      originalNode.setAttribute('height', imageHeight);
-
-      const aspectRatio = crop.aspectRatio || imageHeight / imageWidth;
-
-      const canvasWidth = imageWidth;
-      const canvasHeight = canvasWidth * aspectRatio;
-
-      const canvasZoomFactor = getImageRectZoomFactor(
-        {
-          width: imageWidth,
-          height: imageHeight
-        },
-        getCenteredCropRect(
-          {
-            width: canvasWidth,
-            height: canvasHeight
-          },
-          aspectRatio
-        ),
-        crop.rotation,
-        crop.center
-      );
-
-      const scale = crop.zoom * canvasZoomFactor;
-
-      const rotation = crop.rotation * (180 / Math.PI);
-
-      const canvasCenter = {
-        x: canvasWidth * 0.5,
-        y: canvasHeight * 0.5
-      };
-
-      const imageOffset = {
-        x: canvasCenter.x - imageWidth * crop.center.x,
-        y: canvasCenter.y - imageHeight * crop.center.y
-      };
-
-      const cropTransforms = [
-        // rotate
-        `rotate(${rotation} ${canvasCenter.x} ${canvasCenter.y})`,
-
-        // scale
-        `translate(${canvasCenter.x} ${canvasCenter.y})`,
-        `scale(${scale})`,
-        `translate(${-canvasCenter.x} ${-canvasCenter.y})`,
-
-        // offset
-        `translate(${imageOffset.x} ${imageOffset.y})`
-      ];
-
-      const flipTransforms = [
-        `scale(${crop.flip.horizontal ? -1 : 1} ${
-          crop.flip.vertical ? -1 : 1
-        })`,
-        `translate(${crop.flip.horizontal ? -imageWidth : 0} ${
-          crop.flip.vertical ? -imageHeight : 0
-        })`
-      ];
-
-      // crop
-      const transformed = `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${canvasWidth}${widthUnits}" height="${canvasHeight}${heightUnits}" 
-viewBox="0 0 ${canvasWidth} ${canvasHeight}" 
-preserveAspectRatio="xMinYMin"
-xmlns="http://www.w3.org/2000/svg">
-<!-- Generator: FilePond Image Transform Plugin - https://pqina.nl/filepond -->
-<title>${titleNode ? titleNode.textContent : file.name}</title>
-<desc>Cropped with FilePond.</desc>
-<g transform="${cropTransforms.join(' ')}">
-<g transform="${flipTransforms.join(' ')}">
-${originalNode.outerHTML}
-</g>
-</g>
-</svg>`;
-
-      // create new svg file
-      resolve(transformed);
-    };
-
-    fr.readAsText(file);
-  });
-
-const imageDataToBlob = (imageData, options) =>
-  new Promise((resolve, reject) => {
-    const image = document.createElement('canvas');
-    image.width = imageData.width;
-    image.height = imageData.height;
-    const ctx = image.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
-    image.toBlob(resolve, options.type, options.quality);
-  });
-
 const objectToImageData = obj => {
   let imageData;
   try {
@@ -422,7 +428,9 @@ const TransformWorker = () => {
   // applies all image transforms to the image data array
   const applyTransforms = (transforms, imageData) => {
     transforms.forEach(transform => {
-      imageData = transformMatrix[transform.type](imageData, transform.data);
+      const fn = transformMatrix[transform.type];
+      if (!fn) return;
+      imageData = fn(imageData, transform.data);
     });
     return imageData;
   };
@@ -537,6 +545,16 @@ const TransformWorker = () => {
   }
 };
 
+const imageDataToBlob = (imageData, options) =>
+  new Promise((resolve, reject) => {
+    const image = document.createElement('canvas');
+    image.width = imageData.width;
+    image.height = imageData.height;
+    const ctx = image.getContext('2d');
+    ctx.putImageData(imageData, 0, 0);
+    image.toBlob(resolve, options.type, options.quality);
+  });
+
 const correctOrientation = (view, offset, length) => {
   // Missing 0x45786966 Marker? No Exif Header, stop here
   if (view.getUint32(offset + 4, false) !== 0x45786966) return;
@@ -604,6 +622,118 @@ const getImageHead = file =>
     reader.readAsArrayBuffer(file.slice(0, 256 * 1024));
   });
 
+const createBitmapTransform = ({
+  loadImage,
+  createWorker,
+  getFilenameWithoutExtension,
+  getFileFromBlob
+}) => {
+  // Renames the output file to match the format
+  const renameFileToMatchMimeType = (filename, format) => {
+    const name = getFilenameWithoutExtension(filename);
+    const extension = format === 'image/jpeg' ? 'jpg' : format.split('/')[1];
+    return `${name}.${extension}`;
+  };
+
+  // Returns all the valid output formats we can encode towards
+  const getOutputMimeType = type => {
+    // allowed formats
+    if (type === 'image/jpeg' || type === 'image/png') {
+      return type;
+    }
+    // fallback, will also fix image/jpg
+    return 'image/jpeg';
+  };
+
+  // creates a blob from the passed image data
+  const toBlob = (originalFile, imageData, options) =>
+    new Promise((resolve, reject) => {
+      const blobToFile = blob => {
+        // transform to file
+        const transformedFile = getFileFromBlob(
+          blob,
+          renameFileToMatchMimeType(
+            originalFile.name,
+            getOutputMimeType(blob.type)
+          )
+        );
+
+        // we done!
+        resolve(transformedFile);
+      };
+
+      imageDataToBlob(imageData, options)
+        .then(blob => {
+          if (!options.stripImageHead) {
+            getImageHead(originalFile).then(imageHead => {
+              // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+              if (imageHead !== null) {
+                blob = new Blob([imageHead, blob.slice(20)], {
+                  type: blob.type
+                });
+              }
+              blobToFile(blob);
+            });
+          } else {
+            blobToFile(blob);
+          }
+        })
+        .catch(error => {
+          console.error(error);
+        });
+    });
+
+  return (item, file, transforms, output) =>
+    new Promise((resolve, reject) => {
+      // handle <img> object
+      const handleImage = image => {
+        // exit if was archived in the mean time
+        if (item.archived) return resolve(file);
+
+        // get crop info if set
+        const crop = (transforms.find(t => t.type === 'crop') || {}).data;
+
+        // draw to canvas and start transform chain
+        const imageData = imageToImageData(
+          image,
+          (item.getMetadata('exif') || {}).orientation || -1,
+          crop
+        );
+
+        // no transforms to apply, only output quality changes
+        if (!transforms.length)
+          return toBlob(file, imageData, output).then(resolve);
+
+        // send to the transform worker
+        const worker = createWorker(TransformWorker);
+        worker.post(
+          {
+            transforms,
+            imageData
+          },
+          response => {
+            // exit if was archived in the mean time
+            if (item.archived) return resolve(file);
+
+            // finish up
+            toBlob(file, objectToImageData(response), output).then(resolve);
+
+            // stop worker
+            worker.terminate();
+          },
+          [imageData.data.buffer]
+        );
+      };
+
+      // get file url and load the image so it's an image object and we can access the image data
+      const url = URL.createObjectURL(file);
+      loadImage(url).then(image => {
+        URL.revokeObjectURL(url);
+        handleImage(image);
+      });
+    });
+};
+
 /**
  * Polyfill Edge and IE
  */
@@ -642,40 +772,52 @@ var plugin$1 = _ => {
     isFile
   } = utils;
 
-  // if is not async should prepare now
+  /**
+   * Helper functions
+   */
+
+  // valid transforms
+  const TRANSFORM_LIST = ['crop', 'resize'];
+
+  const createVariantCreator = updateMetadata => (transform, file, metadata) =>
+    transform(file, updateMetadata ? updateMetadata(metadata) : metadata);
+
+  const orderTransforms = transforms => {
+    transforms.sort((a, b) => {
+      const indexOfA = TRANSFORM_LIST.indexOf(a.type);
+      const indexOfB = TRANSFORM_LIST.indexOf(b.type);
+      if (indexOfA < indexOfB) return -1;
+      if (indexOfA > indexOfB) return 1;
+      return 0;
+    });
+  };
+
+  const transformBitmap = createBitmapTransform({
+    loadImage,
+    createWorker,
+    getFileFromBlob,
+    getFilenameWithoutExtension
+  });
+
+  const transformSVG = createSVGTransform({ createBlob, renameFile });
+
+  /**
+   * Filters
+   */
   addFilter(
     'SHOULD_PREPARE_OUTPUT',
     (shouldPrepareOutput, { query, item }) =>
       new Promise(resolve => {
+        // If is not async should prepare now
         resolve(!query('IS_ASYNC'));
       })
   );
-
-  // renames the output file to match the format
-  const renameFileToMatchMimeType = (filename, format) => {
-    const name = getFilenameWithoutExtension(filename);
-    const extension = format === 'image/jpeg' ? 'jpg' : format.split('/')[1];
-    return `${name}.${extension}`;
-  };
-
-  // returns all the valid output formats we can encode towards
-  const getOutputMimeType = type => {
-    // allowed formats
-    if (type === 'image/jpeg' || type === 'image/png') {
-      return type;
-    }
-    // fallback, will also fix image/jpg
-    return 'image/jpeg';
-  };
-
-  // valid transforms
-  const transformOrder = ['resize'];
 
   // subscribe to file transformations
   addFilter(
     'PREPARE_OUTPUT',
     (file, { query, item }) =>
-      new Promise((resolve, reject) => {
+      new Promise(resolve => {
         // if the file is not an image we do not have any business transforming it
         if (
           !isFile(file) ||
@@ -686,142 +828,132 @@ var plugin$1 = _ => {
           return resolve(file);
         }
 
-        // compression quality 0 => 100
-        const qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
-        const quality =
-          qualityAsPercentage === null ? null : qualityAsPercentage / 100;
-        const qualityMode = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY_MODE');
+        // get variants
+        const variants = [];
 
-        // output format
-        const type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
+        // add original file
+        if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_ORIGINAL')) {
+          variants.push(
+            () =>
+              new Promise(resolve => {
+                resolve({
+                  name: query('GET_IMAGE_TRANSFORM_VARIANTS_ORIGINAL_NAME'),
+                  file
+                });
+              })
+          );
+        }
 
-        // get crop
-        const { crop } = item.getMetadata();
+        // add default output version if output default set to true or if no variants defined
+        if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_DEFAULT')) {
+          variants.push(
+            (transform, file, metadata) =>
+              new Promise(resolve => {
+                transform(file, metadata).then(file =>
+                  resolve({
+                    name: query('GET_IMAGE_TRANSFORM_VARIANTS_DEFAULT_NAME'),
+                    file
+                  })
+                );
+              })
+          );
+        }
 
-        // get transforms
-        const transforms = [];
-        forin(item.getMetadata(), (key, value) => {
-          if (!transformOrder.includes(key)) {
-            return;
-          }
-          transforms.push({
-            type: key,
-            data: value
-          });
+        // get other variants
+        const variantsDefinition = query('GET_IMAGE_TRANSFORM_VARIANTS') || {};
+        forin(variantsDefinition, (key, fn) => {
+          const createVariant = createVariantCreator(fn);
+          variants.push(
+            (transform, file, metadata) =>
+              new Promise(resolve => {
+                createVariant(transform, file, metadata).then(file =>
+                  resolve({ name: key, file })
+                );
+              })
+          );
         });
 
-        // no transforms defined, or quality change not required, we done!
-        if (
-          (quality === null ||
-            (quality !== null && qualityMode === 'optional')) &&
-          type === null &&
-          !crop &&
-          !transforms.length
-        ) {
-          return resolve(file);
-        }
+        // output format (quality 0 => 100)
+        const qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
+        const qualityMode = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY_MODE');
+        const quality =
+          qualityAsPercentage === null ? null : qualityAsPercentage / 100;
+        const type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
+        const clientTransforms =
+          query('GET_IMAGE_TRANSFORM_CLIENT_TRANSFORMS') || TRANSFORM_LIST;
 
-        // done
-        const toBlob = (imageData, options) => {
-          const blobToFile = blob => {
-            // transform to file
-            const transformedFile = getFileFromBlob(
-              blob,
-              renameFileToMatchMimeType(file.name, getOutputMimeType(blob.type))
-            );
+        // update transform metadata object
+        item.setMetadata(
+          'output',
+          {
+            quality,
+            type,
+            client: clientTransforms
+          },
+          true
+        );
 
-            // we done!
-            resolve(transformedFile);
-          };
+        // the function that is used to apply the file transformations
+        const transform = (file, metadata) =>
+          new Promise((resolve, reject) => {
+            // The list of transforms to apply
+            const transforms = [];
 
-          imageDataToBlob(imageData, options)
-            .then(blob => {
-              if (!query('GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD')) {
-                getImageHead(file).then(imageHead => {
-                  // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
-                  if (imageHead !== null) {
-                    blob = new Blob([imageHead, blob.slice(20)], {
-                      type: blob.type
-                    });
-                  }
-
-                  blobToFile(blob);
-                });
-              } else {
-                blobToFile(blob);
-              }
-            })
-            .catch(error => {
-              console.error(error);
+            // Move transforms from metadata to transform list
+            forin(metadata, (key, value) => {
+              if (!clientTransforms.includes(key)) return;
+              transforms.push({
+                type: key,
+                data: value
+              });
             });
-        };
 
-        // if this is an svg and we want it to stay an svg
-        if (/svg/.test(file.type) && type === null) {
-          // no cropping? Done (as the SVG is vector data we're not resizing it)
-          if (!crop) {
-            return resolve(file);
-          }
+            // Sort list based on transform order
+            orderTransforms(transforms);
 
-          cropSVG(file, crop).then(text => {
-            resolve(renameFile(createBlob(text, 'image/svg+xml'), file.name));
+            // Get output info so we can check if any output transforms should be applied
+            const { type, quality } = metadata.output || {};
+
+            // no transforms defined, or quality change not required, we done!
+            if (
+              // no transforms to apply
+              transforms.length === 0 &&
+              // no quality requirements, or quality should only be taken into account when other mutations are set,
+              // plus no type changes
+              (quality === null ||
+                (quality !== null && qualityMode === 'optional')) &&
+              (type === null || type === file.type)
+            )
+              return resolve(file);
+
+            // if this is an svg and we want it to stay an svg
+            if (/svg/.test(file.type) && type === null) {
+              return transformSVG(item, file, transforms).then(resolve);
+            }
+
+            transformBitmap(item, file, transforms, {
+              type: type || file.type,
+              quality,
+              stripImageHead: query(
+                'GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD'
+              )
+            }).then(resolve);
           });
 
-          return;
-        }
+        // start creating variants
+        const variantPromises = variants.map(create =>
+          create(transform, file, item.getMetadata())
+        );
 
-        // get file url
-        const url = URL.createObjectURL(file);
-
-        // turn the file into an image
-        loadImage(url).then(image => {
-          // url is no longer needed
-          URL.revokeObjectURL(url);
-
-          // exit if was archived in the mean time
-          if (item.archived) {
-            return resolve(file);
-          }
-
-          // get exif orientation
-          const orientation =
-            (item.getMetadata('exif') || {}).orientation || -1;
-
-          // draw to canvas and start transform chain
-          const imageData = imageToImageData(image, orientation, crop);
-
-          // no further transforms, we done!
-          if (!transforms.length) {
-            toBlob(imageData, {
-              quality,
-              type: type || file.type
-            });
-            return;
-          }
-
-          // send to the transform worker
-          const worker = createWorker(TransformWorker);
-          worker.post(
-            {
-              transforms,
-              imageData
-            },
-            response => {
-              // exit if was archived in the mean time
-              if (item.archived) {
-                return resolve(file);
-              }
-
-              // finish up
-              toBlob(objectToImageData(response), {
-                quality,
-                type: type || file.type
-              });
-
-              // stop worker
-              worker.terminate();
-            },
-            [imageData.data.buffer]
+        // wait for results
+        Promise.all(variantPromises).then(files => {
+          // if single file object in array, return the single file object else, return array of
+          resolve(
+            files.length === 1 && files[0].name === null
+              ? // return the File object
+                files[0].file
+              : // return an array of files { name:'name', file:File }
+                files
           );
         });
       })
@@ -841,12 +973,29 @@ var plugin$1 = _ => {
       // set to false to copy image exif data to output
       imageTransformOutputStripImageHead: [true, Type.BOOLEAN],
 
-      // only apply output quality when a transform is required
-      imageTransformOutputQualityMode: ['always', Type.STRING]
+      // only apply transforms in this list
+      imageTransformClientTransforms: [null, Type.ARRAY],
 
+      // only apply output quality when a transform is required
+      imageTransformOutputQualityMode: ['always', Type.STRING],
       // 'always'
       // 'optional'
       // 'mismatch' (future feature, only applied if quality differs from input)
+
+      // get image transform variants
+      imageTransformVariants: [null, Type.OBJECT],
+
+      // should we post the default transformed file
+      imageTransformVariantsIncludeDefault: [true, Type.BOOLEAN],
+
+      // which name to prefix the default transformed file with
+      imageTransformVariantsDefaultName: [null, Type.STRING],
+
+      // should we post the original file
+      imageTransformVariantsIncludeOriginal: [false, Type.BOOLEAN],
+
+      // which name to prefix the original file with
+      imageTransformVariantsOriginalName: ['original_', Type.STRING]
     }
   };
 };
