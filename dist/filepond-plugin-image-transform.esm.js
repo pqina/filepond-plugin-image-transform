@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.2.0
+ * FilePondPluginImageTransform 3.2.1
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -735,24 +735,26 @@ const createBitmapTransform = ({
 };
 
 /**
- * Polyfill Edge and IE
+ * Polyfill Edge and IE when in Browser
  */
-if (!HTMLCanvasElement.prototype.toBlob) {
-  Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
-    value: function(cb, type, quality) {
-      const canvas = this;
-      setTimeout(() => {
-        const dataURL = canvas.toDataURL(type, quality).split(',')[1];
-        const binStr = atob(dataURL);
-        let index = binStr.length;
-        const data = new Uint8Array(index);
-        while (index--) {
-          data[index] = binStr.charCodeAt(index);
-        }
-        cb(new Blob([data], { type: type || 'image/png' }));
-      });
-    }
-  });
+if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
+  if (!HTMLCanvasElement.prototype.toBlob) {
+    Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
+      value: function(cb, type, quality) {
+        const canvas = this;
+        setTimeout(() => {
+          const dataURL = canvas.toDataURL(type, quality).split(',')[1];
+          const binStr = atob(dataURL);
+          let index = binStr.length;
+          const data = new Uint8Array(index);
+          while (index--) {
+            data[index] = binStr.charCodeAt(index);
+          }
+          cb(new Blob([data], { type: type || 'image/png' }));
+        });
+      }
+    });
+  }
 }
 
 /**
@@ -1003,7 +1005,7 @@ var plugin$1 = _ => {
 const isBrowser =
   typeof window !== 'undefined' && typeof window.document !== 'undefined';
 
-if (isBrowser && document) {
+if (isBrowser) {
   document.dispatchEvent(
     new CustomEvent('FilePond:pluginloaded', { detail: plugin$1 })
   );

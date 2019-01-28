@@ -1,5 +1,5 @@
 /*
- * FilePondPluginImageTransform 3.2.0
+ * FilePondPluginImageTransform 3.2.1
  * Licensed under MIT, https://opensource.org/licenses/MIT
  * Please visit https://pqina.nl/filepond for details.
  */
@@ -856,24 +856,26 @@
   };
 
   /**
-   * Polyfill Edge and IE
+   * Polyfill Edge and IE when in Browser
    */
-  if (!HTMLCanvasElement.prototype.toBlob) {
-    Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
-      value: function value(cb, type, quality) {
-        var canvas = this;
-        setTimeout(function() {
-          var dataURL = canvas.toDataURL(type, quality).split(',')[1];
-          var binStr = atob(dataURL);
-          var index = binStr.length;
-          var data = new Uint8Array(index);
-          while (index--) {
-            data[index] = binStr.charCodeAt(index);
-          }
-          cb(new Blob([data], { type: type || 'image/png' }));
-        });
-      }
-    });
+  if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
+    if (!HTMLCanvasElement.prototype.toBlob) {
+      Object.defineProperty(HTMLCanvasElement.prototype, 'toBlob', {
+        value: function value(cb, type, quality) {
+          var canvas = this;
+          setTimeout(function() {
+            var dataURL = canvas.toDataURL(type, quality).split(',')[1];
+            var binStr = atob(dataURL);
+            var index = binStr.length;
+            var data = new Uint8Array(index);
+            while (index--) {
+              data[index] = binStr.charCodeAt(index);
+            }
+            cb(new Blob([data], { type: type || 'image/png' }));
+          });
+        }
+      });
+    }
   }
 
   /**
@@ -1134,7 +1136,7 @@
   var isBrowser =
     typeof window !== 'undefined' && typeof window.document !== 'undefined';
 
-  if (isBrowser && document) {
+  if (isBrowser) {
     document.dispatchEvent(
       new CustomEvent('FilePond:pluginloaded', { detail: plugin$1 })
     );
