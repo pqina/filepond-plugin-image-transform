@@ -1,10 +1,11 @@
-/*
- * FilePondPluginImageTransform 3.2.2
- * Licensed under MIT, https://opensource.org/licenses/MIT
- * Please visit https://pqina.nl/filepond for details.
+/*!
+ * FilePondPluginImageTransform 3.2.3
+ * Licensed under MIT, https://opensource.org/licenses/MIT/
+ * Please visit https://pqina.nl/filepond/ for details.
  */
 
 /* eslint-disable */
+
 // test if file is of type image
 const isImage = file => /^image/.test(file.type);
 
@@ -312,7 +313,10 @@ const getBitmap = (image, orientation, flip) => {
 
   // get base transformation matrix
   if (orientation) {
-    ctx.transform(...getImageOrientationMatrix(width, height, orientation));
+    ctx.transform.apply(
+      ctx,
+      getImageOrientationMatrix(width, height, orientation)
+    );
   }
 
   if (isFlipped(flip)) {
@@ -331,7 +335,7 @@ const getBitmap = (image, orientation, flip) => {
       matrix[5] = height;
     }
 
-    ctx.transform(...matrix);
+    ctx.transform.apply(ctx, matrix);
   }
 
   ctx.drawImage(image, 0, 0, width, height);
@@ -521,7 +525,7 @@ const TransformWorker = () => {
                 weights_alpha += weight;
                 //colors
                 if (inputData[dx + 3] < 255)
-                  weight = weight * inputData[dx + 3] / 250;
+                  weight = (weight * inputData[dx + 3]) / 250;
                 gx_r += weight * inputData[dx];
                 gx_g += weight * inputData[dx + 1];
                 gx_b += weight * inputData[dx + 2];
@@ -760,8 +764,7 @@ if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
 /**
  * Image Transform Plugin
  */
-var plugin$1 = _ => {
-  const { addFilter, utils } = _;
+const plugin = ({ addFilter, utils }) => {
   const {
     Type,
     forin,
@@ -1002,13 +1005,13 @@ var plugin$1 = _ => {
   };
 };
 
+// fire pluginloaded event if running in browser, this allows registering the plugin when using async script tags
 const isBrowser =
   typeof window !== 'undefined' && typeof window.document !== 'undefined';
-
 if (isBrowser) {
   document.dispatchEvent(
-    new CustomEvent('FilePond:pluginloaded', { detail: plugin$1 })
+    new CustomEvent('FilePond:pluginloaded', { detail: plugin })
   );
 }
 
-export default plugin$1;
+export default plugin;
