@@ -1,6 +1,6 @@
 {
     "name": "filepond-plugin-image-transform",
-    "version": "3.2.3",
+    "version": "3.2.4",
     "description": "Image Transform Plugin for FilePond",
     "license": "MIT",
     "author": {
@@ -12,6 +12,12 @@
     "main": "dist/filepond-plugin-image-transform.js",
     "browser": "dist/filepond-plugin-image-transform.js",
     "module": "dist/filepond-plugin-image-transform.esm.js",
+    "browserslist": [
+        "last 1 version and not Explorer 10",
+        "Explorer 11",
+        "iOS >= 9",
+        "Android >= 4.4"
+    ],
     "files": [
         "dist"
     ],
