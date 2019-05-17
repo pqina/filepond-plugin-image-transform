@@ -1,6 +1,7 @@
 import { isImage } from './utils/isImage';
-import { createSVGTransform } from './utils/createSVGTransform';
-import { createBitmapTransform } from './utils/createBitmapTransform';
+import { renameFileToMatchMimeType } from './utils/renameFileToMatchMimeType';
+import { getValidOutputMimeType } from './utils/getValidOutputMimeType';
+import { transformImage } from './transformImage/index';
 
 /**
  * Polyfill Edge and IE when in Browser
@@ -33,12 +34,7 @@ const plugin = ({ addFilter, utils }) => {
     const {
         Type,
         forin,
-        loadImage,
         getFileFromBlob,
-        getFilenameWithoutExtension,
-        createWorker,
-        createBlob,
-        renameFile,
         isFile
     } = utils;
 
@@ -46,34 +42,23 @@ const plugin = ({ addFilter, utils }) => {
      * Helper functions
      */
 
-    // valid transforms
-    const TRANSFORM_LIST = ['crop', 'resize'];
+    // valid transforms (in correct order)
+    const TRANSFORM_LIST = ['crop', 'resize', 'filter', 'output'];
 
     const createVariantCreator = (updateMetadata) => (transform, file, metadata) => transform(file, updateMetadata ? updateMetadata(metadata) : metadata);
 
-    const orderTransforms = (transforms) => {
-        transforms.sort((a, b) => {
-            const indexOfA = TRANSFORM_LIST.indexOf(a.type);
-            const indexOfB = TRANSFORM_LIST.indexOf(b.type);
-            if (indexOfA < indexOfB) return -1;
-            if (indexOfA > indexOfB) return 1;
-            return 0;
-        });
-    }
-
-    const transformBitmap = createBitmapTransform({
-        loadImage,
-        createWorker,
-        getFileFromBlob,
-        getFilenameWithoutExtension
-    });
-
-    const transformSVG = createSVGTransform({ createBlob, renameFile });
+    const isDefaultCrop = crop => 
+        crop.aspectRatio === null && 
+        crop.rotation === 0 &&
+        crop.zoom === 1 &&
+        crop.center && crop.center.x === .5 && crop.center.y === .5 &&
+        crop.flip && crop.flip.horizontal === false && crop.flip.vertical === false;
+    
 
     /**
      * Filters
      */
-    addFilter('SHOULD_PREPARE_OUTPUT', (shouldPrepareOutput, { query, item }) =>
+    addFilter('SHOULD_PREPARE_OUTPUT', (shouldPrepareOutput, { query }) =>
         new Promise(resolve => {
             // If is not async should prepare now
             resolve(!query('IS_ASYNC'));
@@ -97,14 +82,14 @@ const plugin = ({ addFilter, utils }) => {
                 // add original file
                 if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_ORIGINAL')) {
                     variants.push(() => new Promise(resolve => {
-                        resolve({name:query('GET_IMAGE_TRANSFORM_VARIANTS_ORIGINAL_NAME'), file});
+                        resolve({ name:query('GET_IMAGE_TRANSFORM_VARIANTS_ORIGINAL_NAME'), file });
                     }));
                 }
 
                 // add default output version if output default set to true or if no variants defined
                 if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_DEFAULT')) {
                     variants.push((transform, file, metadata) => new Promise(resolve => {
-                        transform(file, metadata).then(file => resolve({name:query('GET_IMAGE_TRANSFORM_VARIANTS_DEFAULT_NAME'), file}));
+                        transform(file, metadata).then(file => resolve({ name:query('GET_IMAGE_TRANSFORM_VARIANTS_DEFAULT_NAME'), file }));
                     }));
                 }
 
@@ -113,7 +98,7 @@ const plugin = ({ addFilter, utils }) => {
                 forin(variantsDefinition, (key, fn) => {
                     const createVariant = createVariantCreator(fn);
                     variants.push((transform, file, metadata) => new Promise(resolve => {
-                        createVariant(transform, file, metadata).then(file => resolve({name:key, file}));
+                        createVariant(transform, file, metadata).then(file => resolve({ name:key, file }));
                     }));
                 });
                 
@@ -126,55 +111,76 @@ const plugin = ({ addFilter, utils }) => {
 
                 // update transform metadata object
                 item.setMetadata('output', {
-                    quality,
                     type,
+                    quality,
                     client: clientTransforms
                 }, true);
                 
                 // the function that is used to apply the file transformations
                 const transform = (file, metadata) =>  new Promise((resolve, reject) => {
 
-                    // The list of transforms to apply
-                    const transforms = [];
+                    const filteredMetadata = {...metadata};
 
-                    // Move transforms from metadata to transform list
-                    forin(metadata, (key, value) => {
-                        if (!clientTransforms.includes(key)) return;
-                        transforms.push({
-                            type: key,
-                            data: value
+                    Object.keys(filteredMetadata)
+                        .filter(instruction => instruction !== 'image')
+                        .forEach(instruction => {
+                            // if not in list, remove from object, the instruction will be handled by the server
+                            if (clientTransforms.indexOf(instruction) === -1) {
+                                delete filteredMetadata[instruction];
+                            }
                         });
-                    });
 
-                    // Sort list based on transform order
-                    orderTransforms(transforms);
+                    const { resize, exif, output, crop, filter } = filteredMetadata;
 
-                    // Get output info so we can check if any output transforms should be applied
-                    const { type, quality } = metadata.output || {};
+                    const instructions = {
+                        image: {
+                            orientation: exif || null
+                        },
+                        output: output ? {
+                            type: output.type,
+                            quality: output.quality ? output.quality * 100 : null
+                        } : undefined,
+                        size: (resize && (resize.size.width || resize.size.height)) ? {
+                            mode: resize.mode,
+                            upscale: resize.upscale,
+                            ...resize.size
+                        } : undefined,
+                        crop: crop && !isDefaultCrop(crop) ? {
+                            ...crop
+                        } : undefined,
+                        filter
+                    };
 
-                    // no transforms defined, or quality change not required, we done!
-                    if (
-                        // no transforms to apply
-                        transforms.length === 0 &&
+                    if (instructions.output) {
 
-                        // no quality requirements, or quality should only be taken into account when other mutations are set, 
-                        // plus no type changes
-                        (quality === null || (quality !== null && qualityMode === 'optional')) && 
-                        (type === null || (type === file.type))
-                    ) return resolve(file);
+                        // determine if file type will change
+                        const willChangeType = output.type && output.type !== file.type;
 
-                    // if this is an svg and we want it to stay an svg
-                    if (/svg/.test(file.type) && type === null) {
-                        return transformSVG(item, file, transforms).then(resolve);
+                        // determine if file data will be modified
+                        const willModifyImageData = !!(instructions.size || instructions.crop || instructions.filter || willChangeType);
+
+                        // if quality has been set, and quality is optional, and we're not modifying the image data then we don't have to modify the output
+                        if (output.quality && qualityMode === 'optional' && !willModifyImageData) {
+                            return resolve(file);
+                        }
                     }
 
-                    transformBitmap(
-                        item, file, transforms, 
-                        {
-                            type: type || file.type,
-                            quality,
-                            stripImageHead: query('GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD')
-                        }).then(resolve);
+                    const options = {
+                        stripImageHead: query('GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD')
+                    };
+
+                    transformImage(file, instructions, options).then(blob => {
+                        
+                        // set file object
+                        const out = getFileFromBlob(
+                            blob,
+                            // rename the original filename to match the mime type of the output image
+                            renameFileToMatchMimeType(file.name, getValidOutputMimeType(blob.type))
+                        );
+
+                        resolve(out);
+
+                    }).catch(reject);
                 });
                 
                 // start creating variants

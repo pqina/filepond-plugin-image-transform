@@ -1,31 +1,7 @@
 import { getImageOrientationMatrix } from './getImageOrientationMatrix';
 import { getImageRectZoomFactor } from './getImageRectZoomFactor';
 import { getCenteredCropRect } from './getCenteredCropRect';
-
-const calculateCanvasSize = (image, canvasAspectRatio, zoom = 1) => {
-
-    const imageAspectRatio = image.height / image.width;
-
-    // determine actual pixels on x and y axis
-    let canvasWidth = 1;
-    let canvasHeight = canvasAspectRatio
-    let imgWidth = 1;
-    let imgHeight = imageAspectRatio;
-    if (imgHeight > canvasHeight) {
-        imgHeight = canvasHeight;
-        imgWidth = imgHeight / imageAspectRatio;
-    }
-
-    const scalar = Math.max(canvasWidth / imgWidth, canvasHeight / imgHeight);
-
-    const width = image.width / (zoom * imgWidth * scalar);
-    const height = width * canvasAspectRatio;
-
-    return {
-        width: Math.round(width),
-        height: Math.round(height)
-    }
-}
+import { calculateCanvasSize } from './calculateCanvasSize';
 
 const isFlipped = (flip) => flip && (flip.horizontal || flip.vertical)
 
@@ -77,7 +53,7 @@ const getBitmap = (image, orientation, flip) => {
             matrix[5] = height;
         }
 
-        ctx.transform.apply(ctx, matrix);
+        ctx.transform(...matrix);
     }
 
     ctx.drawImage(image, 0, 0, width, height);
@@ -86,12 +62,9 @@ const getBitmap = (image, orientation, flip) => {
   
 };
 
-export const imageToImageData = (imageElement, orientation, crop) => {
-
-    // set default value for crop
-    if (!crop) {
-        crop = {};
-    }
+export const imageToImageData = (imageElement, orientation, crop = {}) => {
+    
+    const zoom = crop.zoom || 1;
 
     // fixes possible image orientation problems by drawing the image on the correct canvas
     const bitmap = getBitmap(imageElement, orientation, crop.flip);
@@ -102,47 +75,48 @@ export const imageToImageData = (imageElement, orientation, crop) => {
 
     const canvas = document.createElement('canvas');
     const aspectRatio = crop.aspectRatio || imageSize.height / imageSize.width;
-    const canvasSize = calculateCanvasSize(imageSize, aspectRatio, crop.zoom);
-    canvas.width = canvasSize.width;
-    canvas.height = canvasSize.height;
 
+    const canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+    
     const canvasCenter = {
-        x: canvas.width * .5,
-        y: canvas.height * .5
-    };
-
-    const imageOffset = {
-        x: canvasCenter.x - (imageSize.width * (crop.center ? crop.center.x : .5)),
-        y: canvasCenter.y - (imageSize.height * (crop.center ? crop.center.y : .5))
+        x: canvasSize.width * .5,
+        y: canvasSize.height * .5
     };
 
     const stage = {
         x: 0,
         y: 0,
-        width: canvas.width,
-        height: canvas.height,
+        width: canvasSize.width,
+        height: canvasSize.height,
         center: canvasCenter
     }
 
     const stageZoomFactor = getImageRectZoomFactor(
         imageSize,
-        getCenteredCropRect(
-            stage, 
-            aspectRatio
-        ),
+        getCenteredCropRect(stage, aspectRatio),
         crop.rotation,
         crop.center
     );
-
-    const scale = (crop.zoom || 1) * stageZoomFactor;
+    
+    const scale = zoom * stageZoomFactor;
 
     // start drawing
+    canvas.width = Math.round(canvasSize.width / scale);
+    canvas.height = Math.round(canvasSize.height / scale);
+
+    canvasCenter.x /= scale;
+    canvasCenter.y /= scale;
+
+    const imageOffset = {
+        x: canvasCenter.x - (imageSize.width * (crop.center ? crop.center.x : .5)),
+        y: canvasCenter.y - (imageSize.height * (crop.center ? crop.center.y : .5))
+    };
+    
     const ctx = canvas.getContext('2d');
 
     // move to draw offset
     ctx.translate(canvasCenter.x, canvasCenter.y);
     ctx.rotate(crop.rotation || 0);
-    ctx.scale(scale, scale);
 
     // draw the image
     ctx.drawImage(

@@ -1,6 +1,3 @@
-
-
-
 const createVector = (x,y) => ({x,y});
 
 const vectorDot = (a, b) => a.x * b.x + a.y * b.y;
@@ -61,7 +58,7 @@ const getRotatedRectSize = (rect, rotation) => {
 
 };
 
-export const getImageRectZoomFactor = (imageRect, cropRect, rotation = 0, center = {x:.5, y:.5}) => {
+export const getImageRectZoomFactor = (imageRect, cropRect, rotation = 0, center = { x:.5, y:.5 }) => {
 
     // calculate available space round image center position
     const cx = center.x > .5 ? 1 - center.x : center.x;
@@ -77,5 +74,4 @@ export const getImageRectZoomFactor = (imageRect, cropRect, rotation = 0, center
         rotatedCropSize.width / imageWidth, 
         rotatedCropSize.height / imageHeight
     );
-
 };
