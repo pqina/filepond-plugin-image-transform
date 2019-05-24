@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.3.0
+ * FilePondPluginImageTransform 3.3.1
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1255,7 +1255,7 @@
 
             Object.keys(filteredMetadata)
               .filter(function(instruction) {
-                return instruction !== 'image';
+                return instruction !== 'exif';
               })
               .forEach(function(instruction) {
                 // if not in list, remove from object, the instruction will be handled by the server
@@ -1271,7 +1271,7 @@
 
             var instructions = {
               image: {
-                orientation: exif || null
+                orientation: exif ? exif.orientation : null
               },
 
               output: output

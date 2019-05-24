@@ -122,7 +122,7 @@ const plugin = ({ addFilter, utils }) => {
                     const filteredMetadata = {...metadata};
 
                     Object.keys(filteredMetadata)
-                        .filter(instruction => instruction !== 'image')
+                        .filter(instruction => instruction !== 'exif')
                         .forEach(instruction => {
                             // if not in list, remove from object, the instruction will be handled by the server
                             if (clientTransforms.indexOf(instruction) === -1) {
@@ -134,7 +134,7 @@ const plugin = ({ addFilter, utils }) => {
 
                     const instructions = {
                         image: {
-                            orientation: exif || null
+                            orientation: exif ? exif.orientation : null
                         },
                         output: output ? {
                             type: output.type,
