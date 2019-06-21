@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.3.1
+ * FilePondPluginImageTransform 3.3.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -498,17 +498,24 @@ const TransformWorker = () => {
     let transforms = data.transforms;
 
     // if has filter and has resize, move filter to resize operation
-    const filterTransform = data.transforms.find(
-      transform => transform.type === 'filter'
-    );
+    let filterTransform = null;
+    transforms.forEach(transform => {
+      if (transform.type === 'filter') {
+        filterTransform = transform;
+      }
+    });
     if (filterTransform) {
       // find resize
-      const resizeTransform = transforms.find(
-        transform => transform.type === 'resize'
-      );
+      let resizeTransform = null;
+      transforms.forEach(transform => {
+        if (transform.type === 'resize') {
+          resizeTransform = transform;
+        }
+      });
+
       if (resizeTransform) {
         // update resize operation
-        resizeTransform.data.filter = filterTransform.data;
+        resizeTransform.data.matrix = filterTransform.data;
 
         // remove filter
         transforms = transforms.filter(
@@ -551,7 +558,35 @@ const TransformWorker = () => {
     }
   }
 
+  const identityMatrix = JSON.stringify([
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0
+  ]);
+  function isIdentityMatrix(filter) {
+    return JSON.stringify(filter || []) === identityMatrix;
+  }
+
   function filter(imageData, matrix) {
+    if (!matrix || isIdentityMatrix(matrix)) return imageData;
+
     const data = imageData.data;
     const l = data.length;
 
@@ -612,12 +647,15 @@ const TransformWorker = () => {
   }
 
   function resize(imageData, data) {
-    let { mode = 'contain', upscale = false, width, height, filter } = data;
+    let { mode = 'contain', upscale = false, width, height, matrix } = data;
+
+    // test if is identity matrix
+    matrix = !matrix || isIdentityMatrix(matrix) ? null : matrix;
 
     // need at least a width or a height
     // also 0 is not a valid width or height
     if (!width && !height) {
-      return imageData;
+      return filter(imageData, matrix);
     }
 
     // make sure all bounds are set
@@ -640,7 +678,7 @@ const TransformWorker = () => {
 
       // if image is too small, exit here with original image
       if (scalar > 1 && upscale === false) {
-        return imageData;
+        return filter(imageData, matrix);
       }
 
       width = imageData.width * scalar;
@@ -715,7 +753,7 @@ const TransformWorker = () => {
         outputData[x2 + 2] = b / weights;
         outputData[x2 + 3] = a / weightsAlpha;
 
-        filter && applyFilterMatrix(x2, outputData, filter);
+        matrix && applyFilterMatrix(x2, outputData, matrix);
       }
     }
 

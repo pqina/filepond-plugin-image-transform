@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.3.1
+ * FilePondPluginImageTransform 3.3.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -587,17 +587,24 @@
       var transforms = data.transforms;
 
       // if has filter and has resize, move filter to resize operation
-      var filterTransform = data.transforms.find(function(transform) {
-        return transform.type === 'filter';
+      var filterTransform = null;
+      transforms.forEach(function(transform) {
+        if (transform.type === 'filter') {
+          filterTransform = transform;
+        }
       });
       if (filterTransform) {
         // find resize
-        var resizeTransform = transforms.find(function(transform) {
-          return transform.type === 'resize';
+        var resizeTransform = null;
+        transforms.forEach(function(transform) {
+          if (transform.type === 'resize') {
+            resizeTransform = transform;
+          }
         });
+
         if (resizeTransform) {
           // update resize operation
-          resizeTransform.data.filter = filterTransform.data;
+          resizeTransform.data.matrix = filterTransform.data;
 
           // remove filter
           transforms = transforms.filter(function(transform) {
@@ -640,7 +647,35 @@
       }
     }
 
+    var identityMatrix = JSON.stringify([
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0
+    ]);
+    function isIdentityMatrix(filter) {
+      return JSON.stringify(filter || []) === identityMatrix;
+    }
+
     function filter(imageData, matrix) {
+      if (!matrix || isIdentityMatrix(matrix)) return imageData;
+
       var data = imageData.data;
       var l = data.length;
 
@@ -707,12 +742,15 @@
         upscale = _data$upscale === void 0 ? false : _data$upscale,
         width = data.width,
         height = data.height,
-        filter = data.filter;
+        matrix = data.matrix;
+
+      // test if is identity matrix
+      matrix = !matrix || isIdentityMatrix(matrix) ? null : matrix;
 
       // need at least a width or a height
       // also 0 is not a valid width or height
       if (!width && !height) {
-        return imageData;
+        return filter(imageData, matrix);
       }
 
       // make sure all bounds are set
@@ -735,7 +773,7 @@
 
         // if image is too small, exit here with original image
         if (scalar > 1 && upscale === false) {
-          return imageData;
+          return filter(imageData, matrix);
         }
 
         width = imageData.width * scalar;
@@ -810,7 +848,7 @@
           outputData[x2 + 2] = b / weights;
           outputData[x2 + 3] = a / weightsAlpha;
 
-          filter && applyFilterMatrix(x2, outputData, filter);
+          matrix && applyFilterMatrix(x2, outputData, matrix);
         }
       }
 
