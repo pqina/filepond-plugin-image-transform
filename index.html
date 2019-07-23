@@ -36,6 +36,7 @@
             imageResizeTargetWidth: 200,
             imageTransformOutputMimeType: 'image/jpeg',
             imageTransformOutputQuality: 70,
+            imageTransformOutputStripImageHead: false,
             onpreparefile: (file, output) => {
                 document.querySelector('img.output').src = URL.createObjectURL(output);
             }

@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.3.2
+ * FilePondPluginImageTransform 3.3.3
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1007,12 +1007,12 @@
     });
   };
 
-  var transformImage = function transformImage(blob, instructions) {
+  var transformImage = function transformImage(file, instructions) {
     var options =
       arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
     return new Promise(function(resolve, reject) {
       // if the file is not an image we do not have any business transforming it
-      if (!blob || !isImage$1(blob)) return reject();
+      if (!file || !isImage$1(file)) return reject();
 
       // get separate options for easier use
       var stripImageHead = options.stripImageHead,
@@ -1069,7 +1069,7 @@
             if (stripImageHead) return resolveWithBlob(blob);
 
             // try to copy image head
-            getImageHead(blob).then(function(imageHead) {
+            getImageHead(file).then(function(imageHead) {
               // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
               if (imageHead !== null) {
                 blob = new Blob([imageHead, blob.slice(20)], {
@@ -1085,14 +1085,14 @@
       };
 
       // if this is an svg and we want it to stay an svg
-      if (/svg/.test(blob.type) && type === null) {
-        return cropSVG(blob, crop).then(function(text) {
+      if (/svg/.test(file.type) && type === null) {
+        return cropSVG(file, crop).then(function(text) {
           resolve(createBlob(text, 'image/svg+xml'));
         });
       }
 
       // get file url
-      var url = URL.createObjectURL(blob);
+      var url = URL.createObjectURL(file);
 
       // turn the file into an image
       loadImage(url).then(function(image) {
@@ -1105,7 +1105,7 @@
         // determine the format of the blob that we will output
         var outputFormat = {
           quality: quality,
-          type: type || blob.type
+          type: type || file.type
         };
 
         // no transforms necessary, we done!

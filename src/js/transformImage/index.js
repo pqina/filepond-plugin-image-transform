@@ -9,10 +9,10 @@ import { createBlob } from './utils/createBlob';
 import { createWorker } from './utils/createWorker';
 import { loadImage } from './utils/loadImage';
 
-export const transformImage = (blob, instructions, options = {}) => new Promise((resolve, reject) => {
+export const transformImage = (file, instructions, options = {}) => new Promise((resolve, reject) => {
 
     // if the file is not an image we do not have any business transforming it
-    if (!blob || !isImage(blob)) return reject();
+    if (!file || !isImage(file)) return reject();
 
     // get separate options for easier use
     const { stripImageHead, beforeCreateBlob, afterCreateBlob } = options;
@@ -58,7 +58,7 @@ export const transformImage = (blob, instructions, options = {}) => new Promise(
             if (stripImageHead) return resolveWithBlob(blob);
 
             // try to copy image head
-            getImageHead(blob).then(imageHead => {
+            getImageHead(file).then(imageHead => {
 
                 // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
                 if (imageHead !== null) {
@@ -72,8 +72,8 @@ export const transformImage = (blob, instructions, options = {}) => new Promise(
         .catch(reject);
 
     // if this is an svg and we want it to stay an svg
-    if (/svg/.test(blob.type) && type === null) {
-        return cropSVG(blob, crop).then(text => {
+    if (/svg/.test(file.type) && type === null) {
+        return cropSVG(file, crop).then(text => {
             resolve(
                 createBlob(text, 'image/svg+xml')
             );
@@ -81,7 +81,7 @@ export const transformImage = (blob, instructions, options = {}) => new Promise(
     }
 
     // get file url
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(file);
 
     // turn the file into an image
     loadImage(url).then(image => {
@@ -95,7 +95,7 @@ export const transformImage = (blob, instructions, options = {}) => new Promise(
         // determine the format of the blob that we will output
         const outputFormat = {
             quality,
-            type: type || blob.type
+            type: type || file.type
         };
 
         // no transforms necessary, we done!
