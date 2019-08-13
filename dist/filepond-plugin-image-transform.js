@@ -234,7 +234,7 @@
   };
 
   var getBitmap = function getBitmap(image, orientation, flip) {
-    if (!orientation && !isFlipped(flip)) {
+    if (orientation <= 1 && !isFlipped(flip)) {
       image.width = image.naturalWidth;
       image.height = image.naturalHeight;
       return image;
@@ -292,6 +292,9 @@
   var imageToImageData = function imageToImageData(imageElement, orientation) {
     var crop =
       arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+    var options =
+      arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : {};
+    var canvasMemoryLimit = options.canvasMemoryLimit;
 
     var zoom = crop.zoom || 1;
 
@@ -302,10 +305,21 @@
       height: bitmap.height
     };
 
-    var canvas = document.createElement('canvas');
     var aspectRatio = crop.aspectRatio || imageSize.height / imageSize.width;
 
     var canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+
+    if (canvasMemoryLimit) {
+      var requiredMemory = canvasSize.width * canvasSize.height;
+      if (requiredMemory > canvasMemoryLimit) {
+        var scalar = Math.sqrt(canvasMemoryLimit) / Math.sqrt(requiredMemory);
+        imageSize.width = Math.floor(imageSize.width * scalar);
+        imageSize.height = Math.floor(imageSize.height * scalar);
+        canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+      }
+    }
+
+    var canvas = document.createElement('canvas');
 
     var canvasCenter = {
       x: canvasSize.width * 0.5,
@@ -387,32 +401,394 @@
     }
   }
 
-  var imageDataToBlob = function imageDataToBlob(imageData, options) {
+  var canvasToBlob = function canvasToBlob(canvas, options) {
     var beforeCreateBlob =
       arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : null;
     return new Promise(function(resolve) {
-      var image = document.createElement('canvas');
-      image.width = imageData.width;
-      image.height = imageData.height;
-      var ctx = image.getContext('2d');
-      ctx.putImageData(imageData, 0, 0);
-      var promisedImage = beforeCreateBlob ? beforeCreateBlob(image) : image;
-      Promise.resolve(promisedImage).then(function(image) {
-        image.toBlob(resolve, options.type, options.quality);
+      var promisedImage = beforeCreateBlob ? beforeCreateBlob(canvas) : canvas;
+      Promise.resolve(promisedImage).then(function(canvas) {
+        canvas.toBlob(resolve, options.type, options.quality);
       });
     });
   };
 
-  var cropSVG = function cropSVG(blob) {
-    var crop =
-      arguments.length > 1 && arguments[1] !== undefined
-        ? arguments[1]
-        : {
-            center: { x: 0.5, y: 0.5 },
-            zoom: 1,
-            rotation: 0,
-            flip: { horizontal: false, vertical: false, aspectRatio: null }
-          };
+  var getMarkupValue = function getMarkupValue(value, size) {
+    var scalar =
+      arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 1;
+    var axis = arguments.length > 3 ? arguments[3] : undefined;
+    if (typeof value === 'string') {
+      return parseFloat(value) * scalar;
+    }
+    if (typeof value === 'number') {
+      return value * (axis ? size[axis] : Math.min(size.width, size.height));
+    }
+    return;
+  };
+
+  var isDefined = function isDefined(value) {
+    return value != null;
+  };
+
+  var getMarkupRect = function getMarkupRect(rect, size) {
+    var scalar =
+      arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 1;
+
+    var left =
+      getMarkupValue(rect.x, size, scalar, 'width') ||
+      getMarkupValue(rect.left, size, scalar, 'width');
+    var top =
+      getMarkupValue(rect.y, size, scalar, 'height') ||
+      getMarkupValue(rect.top, size, scalar, 'height');
+    var width = getMarkupValue(rect.width, size, scalar, 'width');
+    var height = getMarkupValue(rect.height, size, scalar, 'height');
+    var right = getMarkupValue(rect.right, size, scalar, 'width');
+    var bottom = getMarkupValue(rect.bottom, size, scalar, 'height');
+
+    if (!isDefined(top)) {
+      if (isDefined(height) && isDefined(bottom)) {
+        top = size.height - height - bottom;
+      } else {
+        top = bottom;
+      }
+    }
+
+    if (!isDefined(left)) {
+      if (isDefined(width) && isDefined(right)) {
+        left = size.width - width - right;
+      } else {
+        left = right;
+      }
+    }
+
+    if (!isDefined(width)) {
+      if (isDefined(left) && isDefined(right)) {
+        width = size.width - left - right;
+      } else {
+        width = 0;
+      }
+    }
+
+    if (!isDefined(height)) {
+      if (isDefined(top) && isDefined(bottom)) {
+        height = size.height - top - bottom;
+      } else {
+        height = 0;
+      }
+    }
+
+    return {
+      x: left || 0,
+      y: top || 0,
+      width: width || 0,
+      height: height || 0
+    };
+  };
+
+  var vectorMultiply = function vectorMultiply(v, amount) {
+    return createVector$1(v.x * amount, v.y * amount);
+  };
+
+  var vectorAdd = function vectorAdd(a, b) {
+    return createVector$1(a.x + b.x, a.y + b.y);
+  };
+
+  var vectorNormalize = function vectorNormalize(v) {
+    var l = Math.sqrt(v.x * v.x + v.y * v.y);
+    if (l === 0) {
+      return {
+        x: 0,
+        y: 0
+      };
+    }
+    return createVector$1(v.x / l, v.y / l);
+  };
+
+  var vectorRotate = function vectorRotate(v, radians, origin) {
+    var cos = Math.cos(radians);
+    var sin = Math.sin(radians);
+    var t = createVector$1(v.x - origin.x, v.y - origin.y);
+    return createVector$1(
+      origin.x + cos * t.x - sin * t.y,
+      origin.y + sin * t.x + cos * t.y
+    );
+  };
+
+  var createVector$1 = function createVector() {
+    var x =
+      arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 0;
+    var y =
+      arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+    return { x: x, y: y };
+  };
+
+  var getMarkupStyles = function getMarkupStyles(markup, size, scale) {
+    var lineStyle = markup.borderStyle || markup.lineStyle || 'solid';
+    var fill = markup.backgroundColor || markup.fontColor || 'transparent';
+    var stroke = markup.borderColor || markup.lineColor || 'transparent';
+    var strokeWidth = getMarkupValue(
+      markup.borderWidth || markup.lineWidth,
+      size,
+      scale
+    );
+    var lineCap = markup.lineCap || 'round';
+    var lineJoin = markup.lineJoin || 'round';
+    var dashes =
+      typeof lineStyle === 'string'
+        ? ''
+        : lineStyle
+            .map(function(v) {
+              return getMarkupValue(v, size, scale);
+            })
+            .join(',');
+    var opacity = markup.opacity || 1;
+    return {
+      'stroke-linecap': lineCap,
+      'stroke-linejoin': lineJoin,
+      'stroke-width': strokeWidth || 0,
+      'stroke-dasharray': dashes,
+      stroke: stroke,
+      fill: fill,
+      opacity: opacity
+    };
+  };
+
+  var setAttributes = function setAttributes(element, attr) {
+    return Object.keys(attr).forEach(function(key) {
+      return element.setAttribute(key, attr[key]);
+    });
+  };
+
+  var ns = 'http://www.w3.org/2000/svg';
+  var svg = function svg(tag, attr) {
+    var element = document.createElementNS(ns, tag);
+    if (attr) {
+      setAttributes(element, attr);
+    }
+    return element;
+  };
+
+  var updateRect = function updateRect(element) {
+    return setAttributes(
+      element,
+      Object.assign({}, element.rect, element.styles)
+    );
+  };
+
+  var updateEllipse = function updateEllipse(element) {
+    var cx = element.rect.x + element.rect.width * 0.5;
+    var cy = element.rect.y + element.rect.height * 0.5;
+    var rx = element.rect.width * 0.5;
+    var ry = element.rect.height * 0.5;
+    return setAttributes(
+      element,
+      Object.assign(
+        {
+          cx: cx,
+          cy: cy,
+          rx: rx,
+          ry: ry
+        },
+        element.styles
+      )
+    );
+  };
+
+  var IMAGE_FIT_STYLE = {
+    contain: 'xMidYMid meet',
+    cover: 'xMidYMid slice'
+  };
+
+  var updateImage = function updateImage(element, markup) {
+    setAttributes(
+      element,
+      Object.assign({}, element.rect, element.styles, {
+        preserveAspectRatio: IMAGE_FIT_STYLE[markup.fit] || 'none'
+      })
+    );
+  };
+
+  var TEXT_ANCHOR = {
+    left: 'start',
+    center: 'middle',
+    right: 'end'
+  };
+
+  var updateText = function updateText(element, markup, size, scale) {
+    var fontSize = getMarkupValue(markup.fontSize, size, scale);
+    var fontFamily = markup.fontFamily || 'sans-serif';
+    var fontWeight = markup.fontWeight || 'normal';
+    var textAlign = TEXT_ANCHOR[markup.textAlign] || 'start';
+
+    setAttributes(
+      element,
+      Object.assign({}, element.rect, element.styles, {
+        'stroke-width': 0,
+        'font-weight': fontWeight,
+        'font-size': fontSize,
+        'font-family': fontFamily,
+        'text-anchor': textAlign
+      })
+    );
+
+    // update text
+    if (element.text !== markup.text) {
+      element.text = markup.text;
+      element.textContent = markup.text.length ? markup.text : ' ';
+    }
+  };
+
+  var updateLine = function updateLine(element, markup, size, scale) {
+    setAttributes(
+      element,
+      Object.assign({}, element.rect, element.styles, {
+        fill: 'none'
+      })
+    );
+
+    var line = element.childNodes[0];
+    var begin = element.childNodes[1];
+    var end = element.childNodes[2];
+
+    var origin = element.rect;
+
+    var target = {
+      x: element.rect.x + element.rect.width,
+      y: element.rect.y + element.rect.height
+    };
+
+    setAttributes(line, {
+      x1: origin.x,
+      y1: origin.y,
+      x2: target.x,
+      y2: target.y
+    });
+
+    if (!markup.lineDecoration) return;
+
+    begin.style.display = 'none';
+    end.style.display = 'none';
+
+    var v = vectorNormalize({
+      x: target.x - origin.x,
+      y: target.y - origin.y
+    });
+
+    var l = getMarkupValue(0.05, size, scale);
+
+    if (markup.lineDecoration.indexOf('arrow-begin') !== -1) {
+      var arrowBeginRotationPoint = vectorMultiply(v, l);
+      var arrowBeginCenter = vectorAdd(origin, arrowBeginRotationPoint);
+      var arrowBeginA = vectorRotate(origin, 2, arrowBeginCenter);
+      var arrowBeginB = vectorRotate(origin, -2, arrowBeginCenter);
+
+      setAttributes(begin, {
+        style: 'display:block;',
+        d: 'M'
+          .concat(arrowBeginA.x, ',')
+          .concat(arrowBeginA.y, ' L')
+          .concat(origin.x, ',')
+          .concat(origin.y, ' L')
+          .concat(arrowBeginB.x, ',')
+          .concat(arrowBeginB.y)
+      });
+    }
+
+    if (markup.lineDecoration.indexOf('arrow-end') !== -1) {
+      var arrowEndRotationPoint = vectorMultiply(v, -l);
+      var arrowEndCenter = vectorAdd(target, arrowEndRotationPoint);
+      var arrowEndA = vectorRotate(target, 2, arrowEndCenter);
+      var arrowEndB = vectorRotate(target, -2, arrowEndCenter);
+
+      setAttributes(end, {
+        style: 'display:block;',
+        d: 'M'
+          .concat(arrowEndA.x, ',')
+          .concat(arrowEndA.y, ' L')
+          .concat(target.x, ',')
+          .concat(target.y, ' L')
+          .concat(arrowEndB.x, ',')
+          .concat(arrowEndB.y)
+      });
+    }
+  };
+
+  var createShape = function createShape(node) {
+    return function(markup) {
+      return svg(node, { id: markup.id });
+    };
+  };
+
+  var createImage = function createImage(markup) {
+    var shape = svg('image', {
+      id: markup.id,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      opacity: '0'
+    });
+
+    shape.onload = function() {
+      shape.setAttribute('opacity', markup.opacity || 1);
+    };
+    shape.setAttributeNS(
+      'http://www.w3.org/1999/xlink',
+      'xlink:href',
+      markup.src
+    );
+    return shape;
+  };
+
+  var createLine = function createLine(markup) {
+    var shape = svg('g', {
+      id: markup.id,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round'
+    });
+
+    var line = svg('line');
+    shape.appendChild(line);
+
+    var begin = svg('path');
+    shape.appendChild(begin);
+
+    var end = svg('path');
+    shape.appendChild(end);
+
+    return shape;
+  };
+
+  var CREATE_TYPE_ROUTES = {
+    image: createImage,
+    rect: createShape('rect'),
+    ellipse: createShape('ellipse'),
+    text: createShape('text'),
+    line: createLine
+  };
+
+  var UPDATE_TYPE_ROUTES = {
+    rect: updateRect,
+    ellipse: updateEllipse,
+    image: updateImage,
+    text: updateText,
+    line: updateLine
+  };
+
+  var createMarkupByType = function createMarkupByType(type, markup) {
+    return CREATE_TYPE_ROUTES[type](markup);
+  };
+
+  var updateMarkupByType = function updateMarkupByType(
+    element,
+    type,
+    markup,
+    size,
+    scale
+  ) {
+    element.rect = getMarkupRect(markup, size, scale);
+    element.styles = getMarkupStyles(markup, size, scale);
+    UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
+  };
+
+  var cropSVG = function cropSVG(blob, crop, markup) {
     return new Promise(function(resolve) {
       // load blob contents and wrap in crop svg
       var fr = new FileReader();
@@ -461,6 +837,29 @@
         originalNode.style.overflow = 'visible';
         originalNode.setAttribute('width', imageWidth);
         originalNode.setAttribute('height', imageHeight);
+
+        // markup
+        var markupSVG = '';
+        if (markup.length) {
+          var size = {
+            width: imageWidth,
+            height: imageHeight
+          };
+
+          markupSVG = markup.reduce(function(prev, shape) {
+            var el = createMarkupByType(shape[0], shape[1]);
+            updateMarkupByType(el, shape[0], shape[1], size);
+            el.removeAttribute('id');
+            if (el.getAttribute('opacity') === 1) {
+              el.removeAttribute('opacity');
+            }
+            return prev + '\n' + el.outerHTML + '\n';
+          }, '');
+          markupSVG = '\n\n<g>'.concat(
+            markupSVG.replace(/&nbsp;/g, ' '),
+            '</g>\n\n'
+          );
+        }
 
         var aspectRatio = crop.aspectRatio || imageHeight / imageWidth;
 
@@ -536,15 +935,16 @@
           .concat(canvasWidth, ' ')
           .concat(
             canvasHeight,
-            '" \npreserveAspectRatio="xMinYMin"\nxmlns="http://www.w3.org/2000/svg">\n<!-- Generator: PQINA - https://pqina.nl/ -->\n<title>'
+            '" \npreserveAspectRatio="xMinYMin"\nxmlns:xlink="http://www.w3.org/1999/xlink"\nxmlns="http://www.w3.org/2000/svg">\n<!-- Generated by PQINA - https://pqina.nl/ -->\n<title>'
           )
           .concat(
             titleNode ? titleNode.textContent : '',
-            '</title>\n<desc>Cropped with FilePond.</desc>\n<g transform="'
+            '</title>\n<g transform="'
           )
           .concat(cropTransforms.join(' '), '">\n<g transform="')
           .concat(flipTransforms.join(' '), '">\n')
-          .concat(originalNode.outerHTML, '\n</g>\n</g>\n</svg>');
+          .concat(originalNode.outerHTML)
+          .concat(markupSVG, '\n</g>\n</g>\n</svg>');
 
         // create new svg file
         resolve(transformed);
@@ -647,7 +1047,7 @@
       }
     }
 
-    var identityMatrix = JSON.stringify([
+    var identityMatrix = self.JSON.stringify([
       1,
       0,
       0,
@@ -670,7 +1070,7 @@
       0
     ]);
     function isIdentityMatrix(filter) {
-      return JSON.stringify(filter || []) === identityMatrix;
+      return self.JSON.stringify(filter || []) === identityMatrix;
     }
 
     function filter(imageData, matrix) {
@@ -1007,6 +1407,250 @@
     });
   };
 
+  var chain = function chain(funcs) {
+    return funcs.reduce(function(promise, func) {
+      return promise.then(function(result) {
+        return func().then(Array.prototype.concat.bind(result));
+      });
+    }, Promise.resolve([]));
+  };
+
+  var canvasApplyMarkup = function canvasApplyMarkup(canvas, markup) {
+    return new Promise(function(resolve) {
+      var size = {
+        width: canvas.width,
+        height: canvas.height
+      };
+
+      var ctx = canvas.getContext('2d');
+
+      var drawers = markup.map(function(item) {
+        return function() {
+          return new Promise(function(resolve) {
+            var result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve);
+            if (result) resolve();
+          });
+        };
+      });
+
+      chain(drawers).then(function() {
+        return resolve(canvas);
+      });
+    });
+  };
+
+  var applyMarkupStyles = function applyMarkupStyles(ctx, styles) {
+    ctx.beginPath();
+    ctx.lineCap = styles['stroke-linecap'];
+    ctx.lineJoin = styles['stroke-linejoin'];
+    ctx.lineWidth = styles['stroke-width'];
+    if (styles['stroke-dasharray'].length) {
+      ctx.setLineDash(styles['stroke-dasharray'].split(','));
+    }
+    ctx.fillStyle = styles['fill'];
+    ctx.strokeStyle = styles['stroke'];
+    ctx.globalAlpha = styles.opacity || 1;
+  };
+
+  var drawMarkupStyles = function drawMarkupStyles(ctx) {
+    ctx.fill();
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+
+  var drawRect = function drawRect(ctx, size, markup) {
+    var rect = getMarkupRect(markup, size);
+    var styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+    drawMarkupStyles(ctx, styles);
+    return true;
+  };
+
+  var drawEllipse = function drawEllipse(ctx, size, markup) {
+    var rect = getMarkupRect(markup, size);
+    var styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+
+    var x = rect.x,
+      y = rect.y,
+      w = rect.width,
+      h = rect.height,
+      kappa = 0.5522848,
+      ox = (w / 2) * kappa,
+      oy = (h / 2) * kappa,
+      xe = x + w,
+      ye = y + h,
+      xm = x + w / 2,
+      ym = y + h / 2;
+
+    ctx.moveTo(x, ym);
+    ctx.bezierCurveTo(x, ym - oy, xm - ox, y, xm, y);
+    ctx.bezierCurveTo(xm + ox, y, xe, ym - oy, xe, ym);
+    ctx.bezierCurveTo(xe, ym + oy, xm + ox, ye, xm, ye);
+    ctx.bezierCurveTo(xm - ox, ye, x, ym + oy, x, ym);
+
+    drawMarkupStyles(ctx, styles);
+    return true;
+  };
+
+  var drawImage = function drawImage(ctx, size, markup, done) {
+    var rect = getMarkupRect(markup, size);
+    var styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+
+    var image = new Image();
+    image.onload = function() {
+      if (markup.fit === 'cover') {
+        var ar = rect.width / rect.height;
+        var width = ar > 1 ? image.width : image.height * ar;
+        var height = ar > 1 ? image.width / ar : image.height;
+        var x = image.width * 0.5 - width * 0.5;
+        var y = image.height * 0.5 - height * 0.5;
+        ctx.drawImage(
+          image,
+          x,
+          y,
+          width,
+          height,
+          rect.x,
+          rect.y,
+          rect.width,
+          rect.height
+        );
+      } else if (markup.fit === 'contain') {
+        var scalar = Math.min(
+          rect.width / image.width,
+          rect.height / image.height
+        );
+        var _width = scalar * image.width;
+        var _height = scalar * image.height;
+        var _x = rect.x + rect.width * 0.5 - _width * 0.5;
+        var _y = rect.y + rect.height * 0.5 - _height * 0.5;
+        ctx.drawImage(
+          image,
+          0,
+          0,
+          image.width,
+          image.height,
+          _x,
+          _y,
+          _width,
+          _height
+        );
+      } else {
+        ctx.drawImage(
+          image,
+          0,
+          0,
+          image.width,
+          image.height,
+          rect.x,
+          rect.y,
+          rect.width,
+          rect.height
+        );
+      }
+
+      drawMarkupStyles(ctx, styles);
+      done();
+    };
+    image.src = markup.src;
+  };
+
+  var drawText = function drawText(ctx, size, markup) {
+    var rect = getMarkupRect(markup, size);
+    var styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+
+    var fontSize = getMarkupValue(markup.fontSize, size);
+    var fontFamily = markup.fontFamily || 'sans-serif';
+    var fontWeight = markup.fontWeight || 'normal';
+    var textAlign = markup.textAlign || 'left';
+
+    ctx.font = ''
+      .concat(fontWeight, ' ')
+      .concat(fontSize, 'px ')
+      .concat(fontFamily);
+    ctx.textAlign = textAlign;
+    ctx.fillText(markup.text, rect.x, rect.y);
+
+    drawMarkupStyles(ctx, styles);
+    return true;
+  };
+
+  var drawLine = function drawLine(ctx, size, markup) {
+    var rect = getMarkupRect(markup, size);
+    var styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+
+    ctx.beginPath();
+
+    var origin = {
+      x: rect.x,
+      y: rect.y
+    };
+
+    var target = {
+      x: rect.x + rect.width,
+      y: rect.y + rect.height
+    };
+
+    ctx.moveTo(origin.x, origin.y);
+    ctx.lineTo(target.x, target.y);
+
+    var v = vectorNormalize({
+      x: target.x - origin.x,
+      y: target.y - origin.y
+    });
+
+    var l = 0.04 * Math.min(size.width, size.height);
+
+    if (markup.lineDecoration.indexOf('arrow-begin') !== -1) {
+      var arrowBeginRotationPoint = vectorMultiply(v, l);
+      var arrowBeginCenter = vectorAdd(origin, arrowBeginRotationPoint);
+      var arrowBeginA = vectorRotate(origin, 2, arrowBeginCenter);
+      var arrowBeginB = vectorRotate(origin, -2, arrowBeginCenter);
+
+      ctx.moveTo(arrowBeginA.x, arrowBeginA.y);
+      ctx.lineTo(origin.x, origin.y);
+      ctx.lineTo(arrowBeginB.x, arrowBeginB.y);
+    }
+    if (markup.lineDecoration.indexOf('arrow-end') !== -1) {
+      var arrowEndRotationPoint = vectorMultiply(v, -l);
+      var arrowEndCenter = vectorAdd(target, arrowEndRotationPoint);
+      var arrowEndA = vectorRotate(target, 2, arrowEndCenter);
+      var arrowEndB = vectorRotate(target, -2, arrowEndCenter);
+
+      ctx.moveTo(arrowEndA.x, arrowEndA.y);
+      ctx.lineTo(target.x, target.y);
+      ctx.lineTo(arrowEndB.x, arrowEndB.y);
+    }
+
+    // ctx.stroke();
+    // ctx.globalAlpha = 1;
+
+    drawMarkupStyles(ctx, styles);
+    return true;
+  };
+
+  var TYPE_DRAW_ROUTES = {
+    rect: drawRect,
+    ellipse: drawEllipse,
+    image: drawImage,
+    text: drawText,
+    line: drawLine
+  };
+
+  var imageDataToCanvas = function imageDataToCanvas(imageData) {
+    var image = document.createElement('canvas');
+    image.width = imageData.width;
+    image.height = imageData.height;
+    var ctx = image.getContext('2d');
+    ctx.putImageData(imageData, 0, 0);
+    return image;
+  };
+
   var transformImage = function transformImage(file, instructions) {
     var options =
       arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
@@ -1017,12 +1661,14 @@
       // get separate options for easier use
       var stripImageHead = options.stripImageHead,
         beforeCreateBlob = options.beforeCreateBlob,
-        afterCreateBlob = options.afterCreateBlob;
+        afterCreateBlob = options.afterCreateBlob,
+        canvasMemoryLimit = options.canvasMemoryLimit;
 
       // get crop
       var crop = instructions.crop,
         size = instructions.size,
         filter = instructions.filter,
+        markup = instructions.markup,
         output = instructions.output;
 
       // get exif orientation
@@ -1063,30 +1709,36 @@
 
       // done
       var toBlob = function toBlob(imageData, options) {
-        return imageDataToBlob(imageData, options, beforeCreateBlob)
-          .then(function(blob) {
-            // remove image head (default)
-            if (stripImageHead) return resolveWithBlob(blob);
+        var canvas = imageDataToCanvas(imageData);
+        var promisedCanvas = markup.length
+          ? canvasApplyMarkup(canvas, markup)
+          : canvas;
+        Promise.resolve(promisedCanvas).then(function(canvas) {
+          canvasToBlob(canvas, options, beforeCreateBlob)
+            .then(function(blob) {
+              // remove image head (default)
+              if (stripImageHead) return resolveWithBlob(blob);
 
-            // try to copy image head
-            getImageHead(file).then(function(imageHead) {
-              // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
-              if (imageHead !== null) {
-                blob = new Blob([imageHead, blob.slice(20)], {
-                  type: blob.type
-                });
-              }
+              // try to copy image head
+              getImageHead(blob).then(function(imageHead) {
+                // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+                if (imageHead !== null) {
+                  blob = new Blob([imageHead, blob.slice(20)], {
+                    type: blob.type
+                  });
+                }
 
-              // done!
-              resolveWithBlob(blob);
-            });
-          })
-          .catch(reject);
+                // done!
+                resolveWithBlob(blob);
+              });
+            })
+            .catch(reject);
+        });
       };
 
       // if this is an svg and we want it to stay an svg
       if (/svg/.test(file.type) && type === null) {
-        return cropSVG(file, crop).then(function(text) {
+        return cropSVG(file, crop, markup).then(function(text) {
           resolve(createBlob(text, 'image/svg+xml'));
         });
       }
@@ -1100,7 +1752,9 @@
         URL.revokeObjectURL(url);
 
         // draw to canvas and start transform chain
-        var imageData = imageToImageData(image, orientation, crop);
+        var imageData = imageToImageData(image, orientation, crop, {
+          canvasMemoryLimit: canvasMemoryLimit
+        });
 
         // determine the format of the blob that we will output
         var outputFormat = {
@@ -1157,6 +1811,13 @@
     }
   }
 
+  var isBrowser =
+    typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  var isIOS =
+    isBrowser &&
+    /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+    !window.MSStream;
+
   /**
    * Image Transform Plugin
    */
@@ -1173,7 +1834,7 @@
      */
 
     // valid transforms (in correct order)
-    var TRANSFORM_LIST = ['crop', 'resize', 'filter', 'output'];
+    var TRANSFORM_LIST = ['crop', 'resize', 'filter', 'markup', 'output'];
 
     var createVariantCreator = function createVariantCreator(updateMetadata) {
       return function(transform, file, metadata) {
@@ -1305,7 +1966,8 @@
               exif = filteredMetadata.exif,
               output = filteredMetadata.output,
               crop = filteredMetadata.crop,
-              filter = filteredMetadata.filter;
+              filter = filteredMetadata.filter,
+              markup = filteredMetadata.markup;
 
             var instructions = {
               image: {
@@ -1332,6 +1994,7 @@
                 crop && !isDefaultCrop(crop)
                   ? Object.assign({}, crop)
                   : undefined,
+              markup: markup || [],
               filter: filter
             };
 
@@ -1358,6 +2021,11 @@
             }
 
             var options = {
+              beforeCreateBlob: query('GET_IMAGE_TRANSFORM_BEFORE_CREATE_BLOB'),
+              afterCreateBlob: query('GET_IMAGE_TRANSFORM_AFTER_CREATE_BLOB'),
+              canvasMemoryLimit: query(
+                'GET_IMAGE_TRANSFORM_CANVAS_MEMORY_LIMIT'
+              ),
               stripImageHead: query(
                 'GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD'
               )
@@ -1436,14 +2104,24 @@
         imageTransformVariantsIncludeOriginal: [false, Type.BOOLEAN],
 
         // which name to prefix the original file with
-        imageTransformVariantsOriginalName: ['original_', Type.STRING]
+        imageTransformVariantsOriginalName: ['original_', Type.STRING],
+
+        // called before creating the blob, receives canvas, expects promise resolve with canvas
+        imageTransformBeforeCreateBlob: [null, Type.FUNCTION],
+
+        // expects promise resolved with blob
+        imageTransformAfterCreateBlob: [null, Type.FUNCTION],
+
+        // canvas memory limit
+        imageTransformCanvasMemoryLimit: [
+          isBrowser && isIOS ? 4096 * 4096 : null,
+          Type.INT
+        ]
       }
     };
   };
 
   // fire pluginloaded event if running in browser, this allows registering the plugin when using async script tags
-  var isBrowser =
-    typeof window !== 'undefined' && typeof window.document !== 'undefined';
   if (isBrowser) {
     document.dispatchEvent(
       new CustomEvent('FilePond:pluginloaded', { detail: plugin })

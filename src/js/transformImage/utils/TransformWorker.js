@@ -75,9 +75,9 @@ export const TransformWorker = () => {
         }
     }
 
-    const identityMatrix = JSON.stringify([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0]);
+    const identityMatrix = self.JSON.stringify([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0]);
     function isIdentityMatrix(filter) {
-        return JSON.stringify(filter || []) === identityMatrix;
+        return self.JSON.stringify(filter || []) === identityMatrix;
     }
 
     function filter(imageData, matrix) {

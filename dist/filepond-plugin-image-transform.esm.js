@@ -170,7 +170,7 @@ const calculateCanvasSize = (image, canvasAspectRatio, zoom = 1) => {
 const isFlipped = flip => flip && (flip.horizontal || flip.vertical);
 
 const getBitmap = (image, orientation, flip) => {
-  if (!orientation && !isFlipped(flip)) {
+  if (orientation <= 1 && !isFlipped(flip)) {
     image.width = image.naturalWidth;
     image.height = image.naturalHeight;
     return image;
@@ -225,7 +225,14 @@ const getBitmap = (image, orientation, flip) => {
   return canvas;
 };
 
-const imageToImageData = (imageElement, orientation, crop = {}) => {
+const imageToImageData = (
+  imageElement,
+  orientation,
+  crop = {},
+  options = {}
+) => {
+  const { canvasMemoryLimit } = options;
+
   const zoom = crop.zoom || 1;
 
   // fixes possible image orientation problems by drawing the image on the correct canvas
@@ -235,10 +242,21 @@ const imageToImageData = (imageElement, orientation, crop = {}) => {
     height: bitmap.height
   };
 
-  const canvas = document.createElement('canvas');
   const aspectRatio = crop.aspectRatio || imageSize.height / imageSize.width;
 
-  const canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+  let canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+
+  if (canvasMemoryLimit) {
+    const requiredMemory = canvasSize.width * canvasSize.height;
+    if (requiredMemory > canvasMemoryLimit) {
+      const scalar = Math.sqrt(canvasMemoryLimit) / Math.sqrt(requiredMemory);
+      imageSize.width = Math.floor(imageSize.width * scalar);
+      imageSize.height = Math.floor(imageSize.height * scalar);
+      canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+    }
+  }
+
+  const canvas = document.createElement('canvas');
 
   const canvasCenter = {
     x: canvasSize.width * 0.5,
@@ -317,28 +335,337 @@ if (IS_BROWSER) {
   }
 }
 
-const imageDataToBlob = (imageData, options, beforeCreateBlob = null) =>
+const canvasToBlob = (canvas, options, beforeCreateBlob = null) =>
   new Promise(resolve => {
-    const image = document.createElement('canvas');
-    image.width = imageData.width;
-    image.height = imageData.height;
-    const ctx = image.getContext('2d');
-    ctx.putImageData(imageData, 0, 0);
-    const promisedImage = beforeCreateBlob ? beforeCreateBlob(image) : image;
-    Promise.resolve(promisedImage).then(image => {
-      image.toBlob(resolve, options.type, options.quality);
+    const promisedImage = beforeCreateBlob ? beforeCreateBlob(canvas) : canvas;
+    Promise.resolve(promisedImage).then(canvas => {
+      canvas.toBlob(resolve, options.type, options.quality);
     });
   });
 
-const cropSVG = (
-  blob,
-  crop = {
-    center: { x: 0.5, y: 0.5 },
-    zoom: 1,
-    rotation: 0,
-    flip: { horizontal: false, vertical: false, aspectRatio: null }
+const getMarkupValue = (value, size, scalar = 1, axis) => {
+  if (typeof value === 'string') {
+    return parseFloat(value) * scalar;
   }
-) =>
+  if (typeof value === 'number') {
+    return value * (axis ? size[axis] : Math.min(size.width, size.height));
+  }
+  return;
+};
+
+const isDefined = value => value != null;
+
+const getMarkupRect = (rect, size, scalar = 1) => {
+  let left =
+    getMarkupValue(rect.x, size, scalar, 'width') ||
+    getMarkupValue(rect.left, size, scalar, 'width');
+  let top =
+    getMarkupValue(rect.y, size, scalar, 'height') ||
+    getMarkupValue(rect.top, size, scalar, 'height');
+  let width = getMarkupValue(rect.width, size, scalar, 'width');
+  let height = getMarkupValue(rect.height, size, scalar, 'height');
+  let right = getMarkupValue(rect.right, size, scalar, 'width');
+  let bottom = getMarkupValue(rect.bottom, size, scalar, 'height');
+
+  if (!isDefined(top)) {
+    if (isDefined(height) && isDefined(bottom)) {
+      top = size.height - height - bottom;
+    } else {
+      top = bottom;
+    }
+  }
+
+  if (!isDefined(left)) {
+    if (isDefined(width) && isDefined(right)) {
+      left = size.width - width - right;
+    } else {
+      left = right;
+    }
+  }
+
+  if (!isDefined(width)) {
+    if (isDefined(left) && isDefined(right)) {
+      width = size.width - left - right;
+    } else {
+      width = 0;
+    }
+  }
+
+  if (!isDefined(height)) {
+    if (isDefined(top) && isDefined(bottom)) {
+      height = size.height - top - bottom;
+    } else {
+      height = 0;
+    }
+  }
+
+  return {
+    x: left || 0,
+    y: top || 0,
+    width: width || 0,
+    height: height || 0
+  };
+};
+
+const vectorMultiply = (v, amount) =>
+  createVector$1(v.x * amount, v.y * amount);
+
+const vectorAdd = (a, b) => createVector$1(a.x + b.x, a.y + b.y);
+
+const vectorNormalize = v => {
+  const l = Math.sqrt(v.x * v.x + v.y * v.y);
+  if (l === 0) {
+    return {
+      x: 0,
+      y: 0
+    };
+  }
+  return createVector$1(v.x / l, v.y / l);
+};
+
+const vectorRotate = (v, radians, origin) => {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const t = createVector$1(v.x - origin.x, v.y - origin.y);
+  return createVector$1(
+    origin.x + cos * t.x - sin * t.y,
+    origin.y + sin * t.x + cos * t.y
+  );
+};
+
+const createVector$1 = (x = 0, y = 0) => ({ x, y });
+
+const getMarkupStyles = (markup, size, scale) => {
+  const lineStyle = markup.borderStyle || markup.lineStyle || 'solid';
+  const fill = markup.backgroundColor || markup.fontColor || 'transparent';
+  const stroke = markup.borderColor || markup.lineColor || 'transparent';
+  const strokeWidth = getMarkupValue(
+    markup.borderWidth || markup.lineWidth,
+    size,
+    scale
+  );
+  const lineCap = markup.lineCap || 'round';
+  const lineJoin = markup.lineJoin || 'round';
+  const dashes =
+    typeof lineStyle === 'string'
+      ? ''
+      : lineStyle.map(v => getMarkupValue(v, size, scale)).join(',');
+  const opacity = markup.opacity || 1;
+  return {
+    'stroke-linecap': lineCap,
+    'stroke-linejoin': lineJoin,
+    'stroke-width': strokeWidth || 0,
+    'stroke-dasharray': dashes,
+    stroke,
+    fill,
+    opacity
+  };
+};
+
+const setAttributes = (element, attr) =>
+  Object.keys(attr).forEach(key => element.setAttribute(key, attr[key]));
+
+const ns = 'http://www.w3.org/2000/svg';
+const svg = (tag, attr) => {
+  const element = document.createElementNS(ns, tag);
+  if (attr) {
+    setAttributes(element, attr);
+  }
+  return element;
+};
+
+const updateRect = element =>
+  setAttributes(element, {
+    ...element.rect,
+    ...element.styles
+  });
+
+const updateEllipse = element => {
+  const cx = element.rect.x + element.rect.width * 0.5;
+  const cy = element.rect.y + element.rect.height * 0.5;
+  const rx = element.rect.width * 0.5;
+  const ry = element.rect.height * 0.5;
+  return setAttributes(element, {
+    cx,
+    cy,
+    rx,
+    ry,
+    ...element.styles
+  });
+};
+
+const IMAGE_FIT_STYLE = {
+  contain: 'xMidYMid meet',
+  cover: 'xMidYMid slice'
+};
+
+const updateImage = (element, markup) => {
+  setAttributes(element, {
+    ...element.rect,
+    ...element.styles,
+    preserveAspectRatio: IMAGE_FIT_STYLE[markup.fit] || 'none'
+  });
+};
+
+const TEXT_ANCHOR = {
+  left: 'start',
+  center: 'middle',
+  right: 'end'
+};
+
+const updateText = (element, markup, size, scale) => {
+  const fontSize = getMarkupValue(markup.fontSize, size, scale);
+  const fontFamily = markup.fontFamily || 'sans-serif';
+  const fontWeight = markup.fontWeight || 'normal';
+  const textAlign = TEXT_ANCHOR[markup.textAlign] || 'start';
+
+  setAttributes(element, {
+    ...element.rect,
+    ...element.styles,
+    'stroke-width': 0,
+    'font-weight': fontWeight,
+    'font-size': fontSize,
+    'font-family': fontFamily,
+    'text-anchor': textAlign
+  });
+
+  // update text
+  if (element.text !== markup.text) {
+    element.text = markup.text;
+    element.textContent = markup.text.length ? markup.text : ' ';
+  }
+};
+
+const updateLine = (element, markup, size, scale) => {
+  setAttributes(element, {
+    ...element.rect,
+    ...element.styles,
+    fill: 'none'
+  });
+
+  const line = element.childNodes[0];
+  const begin = element.childNodes[1];
+  const end = element.childNodes[2];
+
+  const origin = element.rect;
+
+  const target = {
+    x: element.rect.x + element.rect.width,
+    y: element.rect.y + element.rect.height
+  };
+
+  setAttributes(line, {
+    x1: origin.x,
+    y1: origin.y,
+    x2: target.x,
+    y2: target.y
+  });
+
+  if (!markup.lineDecoration) return;
+
+  begin.style.display = 'none';
+  end.style.display = 'none';
+
+  const v = vectorNormalize({
+    x: target.x - origin.x,
+    y: target.y - origin.y
+  });
+
+  const l = getMarkupValue(0.05, size, scale);
+
+  if (markup.lineDecoration.indexOf('arrow-begin') !== -1) {
+    const arrowBeginRotationPoint = vectorMultiply(v, l);
+    const arrowBeginCenter = vectorAdd(origin, arrowBeginRotationPoint);
+    const arrowBeginA = vectorRotate(origin, 2, arrowBeginCenter);
+    const arrowBeginB = vectorRotate(origin, -2, arrowBeginCenter);
+
+    setAttributes(begin, {
+      style: 'display:block;',
+      d: `M${arrowBeginA.x},${arrowBeginA.y} L${origin.x},${origin.y} L${
+        arrowBeginB.x
+      },${arrowBeginB.y}`
+    });
+  }
+
+  if (markup.lineDecoration.indexOf('arrow-end') !== -1) {
+    const arrowEndRotationPoint = vectorMultiply(v, -l);
+    const arrowEndCenter = vectorAdd(target, arrowEndRotationPoint);
+    const arrowEndA = vectorRotate(target, 2, arrowEndCenter);
+    const arrowEndB = vectorRotate(target, -2, arrowEndCenter);
+
+    setAttributes(end, {
+      style: 'display:block;',
+      d: `M${arrowEndA.x},${arrowEndA.y} L${target.x},${target.y} L${
+        arrowEndB.x
+      },${arrowEndB.y}`
+    });
+  }
+};
+
+const createShape = node => markup => svg(node, { id: markup.id });
+
+const createImage = markup => {
+  const shape = svg('image', {
+    id: markup.id,
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    opacity: '0'
+  });
+  shape.onload = () => {
+    shape.setAttribute('opacity', markup.opacity || 1);
+  };
+  shape.setAttributeNS(
+    'http://www.w3.org/1999/xlink',
+    'xlink:href',
+    markup.src
+  );
+  return shape;
+};
+
+const createLine = markup => {
+  const shape = svg('g', {
+    id: markup.id,
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round'
+  });
+
+  const line = svg('line');
+  shape.appendChild(line);
+
+  const begin = svg('path');
+  shape.appendChild(begin);
+
+  const end = svg('path');
+  shape.appendChild(end);
+
+  return shape;
+};
+
+const CREATE_TYPE_ROUTES = {
+  image: createImage,
+  rect: createShape('rect'),
+  ellipse: createShape('ellipse'),
+  text: createShape('text'),
+  line: createLine
+};
+
+const UPDATE_TYPE_ROUTES = {
+  rect: updateRect,
+  ellipse: updateEllipse,
+  image: updateImage,
+  text: updateText,
+  line: updateLine
+};
+
+const createMarkupByType = (type, markup) => CREATE_TYPE_ROUTES[type](markup);
+
+const updateMarkupByType = (element, type, markup, size, scale) => {
+  element.rect = getMarkupRect(markup, size, scale);
+  element.styles = getMarkupStyles(markup, size, scale);
+  UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
+};
+
+const cropSVG = (blob, crop, markup) =>
   new Promise(resolve => {
     // load blob contents and wrap in crop svg
     const fr = new FileReader();
@@ -386,6 +713,25 @@ const cropSVG = (
       originalNode.style.overflow = 'visible';
       originalNode.setAttribute('width', imageWidth);
       originalNode.setAttribute('height', imageHeight);
+
+      // markup
+      let markupSVG = '';
+      if (markup.length) {
+        const size = {
+          width: imageWidth,
+          height: imageHeight
+        };
+        markupSVG = markup.reduce((prev, shape) => {
+          const el = createMarkupByType(shape[0], shape[1]);
+          updateMarkupByType(el, shape[0], shape[1], size);
+          el.removeAttribute('id');
+          if (el.getAttribute('opacity') === 1) {
+            el.removeAttribute('opacity');
+          }
+          return prev + '\n' + el.outerHTML + '\n';
+        }, '');
+        markupSVG = `\n\n<g>${markupSVG.replace(/&nbsp;/g, ' ')}</g>\n\n`;
+      }
 
       const aspectRatio = crop.aspectRatio || imageHeight / imageWidth;
 
@@ -449,13 +795,13 @@ const cropSVG = (
 <svg width="${canvasWidth}${widthUnits}" height="${canvasHeight}${heightUnits}" 
 viewBox="0 0 ${canvasWidth} ${canvasHeight}" 
 preserveAspectRatio="xMinYMin"
+xmlns:xlink="http://www.w3.org/1999/xlink"
 xmlns="http://www.w3.org/2000/svg">
-<!-- Generator: PQINA - https://pqina.nl/ -->
+<!-- Generated by PQINA - https://pqina.nl/ -->
 <title>${titleNode ? titleNode.textContent : ''}</title>
-<desc>Cropped with FilePond.</desc>
 <g transform="${cropTransforms.join(' ')}">
 <g transform="${flipTransforms.join(' ')}">
-${originalNode.outerHTML}
+${originalNode.outerHTML}${markupSVG}
 </g>
 </g>
 </svg>`;
@@ -558,7 +904,7 @@ const TransformWorker = () => {
     }
   }
 
-  const identityMatrix = JSON.stringify([
+  const identityMatrix = self.JSON.stringify([
     1,
     0,
     0,
@@ -581,7 +927,7 @@ const TransformWorker = () => {
     0
   ]);
   function isIdentityMatrix(filter) {
-    return JSON.stringify(filter || []) === identityMatrix;
+    return self.JSON.stringify(filter || []) === identityMatrix;
   }
 
   function filter(imageData, matrix) {
@@ -905,16 +1251,256 @@ const loadImage = url =>
     img.src = url;
   });
 
+const chain = funcs =>
+  funcs.reduce(
+    (promise, func) =>
+      promise.then(result => func().then(Array.prototype.concat.bind(result))),
+    Promise.resolve([])
+  );
+
+const canvasApplyMarkup = (canvas, markup) =>
+  new Promise(resolve => {
+    const size = {
+      width: canvas.width,
+      height: canvas.height
+    };
+
+    const ctx = canvas.getContext('2d');
+
+    const drawers = markup.map(item => () =>
+      new Promise(resolve => {
+        const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve);
+        if (result) resolve();
+      })
+    );
+
+    chain(drawers).then(() => resolve(canvas));
+  });
+
+const applyMarkupStyles = (ctx, styles) => {
+  ctx.beginPath();
+  ctx.lineCap = styles['stroke-linecap'];
+  ctx.lineJoin = styles['stroke-linejoin'];
+  ctx.lineWidth = styles['stroke-width'];
+  if (styles['stroke-dasharray'].length) {
+    ctx.setLineDash(styles['stroke-dasharray'].split(','));
+  }
+  ctx.fillStyle = styles['fill'];
+  ctx.strokeStyle = styles['stroke'];
+  ctx.globalAlpha = styles.opacity || 1;
+};
+
+const drawMarkupStyles = ctx => {
+  ctx.fill();
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+};
+
+const drawRect = (ctx, size, markup) => {
+  const rect = getMarkupRect(markup, size);
+  const styles = getMarkupStyles(markup, size);
+  applyMarkupStyles(ctx, styles);
+  ctx.rect(rect.x, rect.y, rect.width, rect.height);
+  drawMarkupStyles(ctx, styles);
+  return true;
+};
+
+const drawEllipse = (ctx, size, markup) => {
+  const rect = getMarkupRect(markup, size);
+  const styles = getMarkupStyles(markup, size);
+  applyMarkupStyles(ctx, styles);
+
+  const x = rect.x,
+    y = rect.y,
+    w = rect.width,
+    h = rect.height,
+    kappa = 0.5522848,
+    ox = (w / 2) * kappa,
+    oy = (h / 2) * kappa,
+    xe = x + w,
+    ye = y + h,
+    xm = x + w / 2,
+    ym = y + h / 2;
+
+  ctx.moveTo(x, ym);
+  ctx.bezierCurveTo(x, ym - oy, xm - ox, y, xm, y);
+  ctx.bezierCurveTo(xm + ox, y, xe, ym - oy, xe, ym);
+  ctx.bezierCurveTo(xe, ym + oy, xm + ox, ye, xm, ye);
+  ctx.bezierCurveTo(xm - ox, ye, x, ym + oy, x, ym);
+
+  drawMarkupStyles(ctx, styles);
+  return true;
+};
+
+const drawImage = (ctx, size, markup, done) => {
+  const rect = getMarkupRect(markup, size);
+  const styles = getMarkupStyles(markup, size);
+  applyMarkupStyles(ctx, styles);
+
+  const image = new Image();
+  image.onload = () => {
+    if (markup.fit === 'cover') {
+      const ar = rect.width / rect.height;
+      const width = ar > 1 ? image.width : image.height * ar;
+      const height = ar > 1 ? image.width / ar : image.height;
+      const x = image.width * 0.5 - width * 0.5;
+      const y = image.height * 0.5 - height * 0.5;
+      ctx.drawImage(
+        image,
+        x,
+        y,
+        width,
+        height,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height
+      );
+    } else if (markup.fit === 'contain') {
+      const scalar = Math.min(
+        rect.width / image.width,
+        rect.height / image.height
+      );
+      const width = scalar * image.width;
+      const height = scalar * image.height;
+      const x = rect.x + rect.width * 0.5 - width * 0.5;
+      const y = rect.y + rect.height * 0.5 - height * 0.5;
+      ctx.drawImage(
+        image,
+        0,
+        0,
+        image.width,
+        image.height,
+        x,
+        y,
+        width,
+        height
+      );
+    } else {
+      ctx.drawImage(
+        image,
+        0,
+        0,
+        image.width,
+        image.height,
+        rect.x,
+        rect.y,
+        rect.width,
+        rect.height
+      );
+    }
+
+    drawMarkupStyles(ctx, styles);
+    done();
+  };
+  image.src = markup.src;
+};
+
+const drawText = (ctx, size, markup) => {
+  const rect = getMarkupRect(markup, size);
+  const styles = getMarkupStyles(markup, size);
+  applyMarkupStyles(ctx, styles);
+
+  const fontSize = getMarkupValue(markup.fontSize, size);
+  const fontFamily = markup.fontFamily || 'sans-serif';
+  const fontWeight = markup.fontWeight || 'normal';
+  const textAlign = markup.textAlign || 'left';
+
+  ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+  ctx.textAlign = textAlign;
+  ctx.fillText(markup.text, rect.x, rect.y);
+
+  drawMarkupStyles(ctx, styles);
+  return true;
+};
+
+const drawLine = (ctx, size, markup) => {
+  const rect = getMarkupRect(markup, size);
+  const styles = getMarkupStyles(markup, size);
+  applyMarkupStyles(ctx, styles);
+
+  ctx.beginPath();
+
+  const origin = {
+    x: rect.x,
+    y: rect.y
+  };
+
+  const target = {
+    x: rect.x + rect.width,
+    y: rect.y + rect.height
+  };
+
+  ctx.moveTo(origin.x, origin.y);
+  ctx.lineTo(target.x, target.y);
+
+  const v = vectorNormalize({
+    x: target.x - origin.x,
+    y: target.y - origin.y
+  });
+
+  const l = 0.04 * Math.min(size.width, size.height);
+
+  if (markup.lineDecoration.indexOf('arrow-begin') !== -1) {
+    const arrowBeginRotationPoint = vectorMultiply(v, l);
+    const arrowBeginCenter = vectorAdd(origin, arrowBeginRotationPoint);
+    const arrowBeginA = vectorRotate(origin, 2, arrowBeginCenter);
+    const arrowBeginB = vectorRotate(origin, -2, arrowBeginCenter);
+
+    ctx.moveTo(arrowBeginA.x, arrowBeginA.y);
+    ctx.lineTo(origin.x, origin.y);
+    ctx.lineTo(arrowBeginB.x, arrowBeginB.y);
+  }
+  if (markup.lineDecoration.indexOf('arrow-end') !== -1) {
+    const arrowEndRotationPoint = vectorMultiply(v, -l);
+    const arrowEndCenter = vectorAdd(target, arrowEndRotationPoint);
+    const arrowEndA = vectorRotate(target, 2, arrowEndCenter);
+    const arrowEndB = vectorRotate(target, -2, arrowEndCenter);
+
+    ctx.moveTo(arrowEndA.x, arrowEndA.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.lineTo(arrowEndB.x, arrowEndB.y);
+  }
+
+  // ctx.stroke();
+  // ctx.globalAlpha = 1;
+
+  drawMarkupStyles(ctx, styles);
+  return true;
+};
+
+const TYPE_DRAW_ROUTES = {
+  rect: drawRect,
+  ellipse: drawEllipse,
+  image: drawImage,
+  text: drawText,
+  line: drawLine
+};
+
+const imageDataToCanvas = imageData => {
+  const image = document.createElement('canvas');
+  image.width = imageData.width;
+  image.height = imageData.height;
+  const ctx = image.getContext('2d');
+  ctx.putImageData(imageData, 0, 0);
+  return image;
+};
+
 const transformImage = (file, instructions, options = {}) =>
   new Promise((resolve, reject) => {
     // if the file is not an image we do not have any business transforming it
     if (!file || !isImage$1(file)) return reject();
 
     // get separate options for easier use
-    const { stripImageHead, beforeCreateBlob, afterCreateBlob } = options;
+    const {
+      stripImageHead,
+      beforeCreateBlob,
+      afterCreateBlob,
+      canvasMemoryLimit
+    } = options;
 
     // get crop
-    const { crop, size, filter, output } = instructions;
+    const { crop, size, filter, markup, output } = instructions;
 
     // get exif orientation
     const orientation =
@@ -953,28 +1539,37 @@ const transformImage = (file, instructions, options = {}) =>
     };
 
     // done
-    const toBlob = (imageData, options) =>
-      imageDataToBlob(imageData, options, beforeCreateBlob)
-        .then(blob => {
-          // remove image head (default)
-          if (stripImageHead) return resolveWithBlob(blob);
+    const toBlob = (imageData, options) => {
+      const canvas = imageDataToCanvas(imageData);
+      const promisedCanvas = markup.length
+        ? canvasApplyMarkup(canvas, markup)
+        : canvas;
+      Promise.resolve(promisedCanvas).then(canvas => {
+        canvasToBlob(canvas, options, beforeCreateBlob)
+          .then(blob => {
+            // remove image head (default)
+            if (stripImageHead) return resolveWithBlob(blob);
 
-          // try to copy image head
-          getImageHead(file).then(imageHead => {
-            // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
-            if (imageHead !== null) {
-              blob = new Blob([imageHead, blob.slice(20)], { type: blob.type });
-            }
+            // try to copy image head
+            getImageHead(blob).then(imageHead => {
+              // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+              if (imageHead !== null) {
+                blob = new Blob([imageHead, blob.slice(20)], {
+                  type: blob.type
+                });
+              }
 
-            // done!
-            resolveWithBlob(blob);
-          });
-        })
-        .catch(reject);
+              // done!
+              resolveWithBlob(blob);
+            });
+          })
+          .catch(reject);
+      });
+    };
 
     // if this is an svg and we want it to stay an svg
     if (/svg/.test(file.type) && type === null) {
-      return cropSVG(file, crop).then(text => {
+      return cropSVG(file, crop, markup).then(text => {
         resolve(createBlob(text, 'image/svg+xml'));
       });
     }
@@ -988,7 +1583,9 @@ const transformImage = (file, instructions, options = {}) =>
       URL.revokeObjectURL(url);
 
       // draw to canvas and start transform chain
-      const imageData = imageToImageData(image, orientation, crop);
+      const imageData = imageToImageData(image, orientation, crop, {
+        canvasMemoryLimit
+      });
 
       // determine the format of the blob that we will output
       const outputFormat = {
@@ -1043,6 +1640,11 @@ if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
   }
 }
 
+const isBrowser =
+  typeof window !== 'undefined' && typeof window.document !== 'undefined';
+const isIOS =
+  isBrowser && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
 /**
  * Image Transform Plugin
  */
@@ -1054,7 +1656,7 @@ const plugin = ({ addFilter, utils }) => {
    */
 
   // valid transforms (in correct order)
-  const TRANSFORM_LIST = ['crop', 'resize', 'filter', 'output'];
+  const TRANSFORM_LIST = ['crop', 'resize', 'filter', 'markup', 'output'];
 
   const createVariantCreator = updateMetadata => (transform, file, metadata) =>
     transform(file, updateMetadata ? updateMetadata(metadata) : metadata);
@@ -1176,7 +1778,14 @@ const plugin = ({ addFilter, utils }) => {
                 }
               });
 
-            const { resize, exif, output, crop, filter } = filteredMetadata;
+            const {
+              resize,
+              exif,
+              output,
+              crop,
+              filter,
+              markup
+            } = filteredMetadata;
 
             const instructions = {
               image: {
@@ -1202,6 +1811,7 @@ const plugin = ({ addFilter, utils }) => {
                       ...crop
                     }
                   : undefined,
+              markup: markup || [],
               filter
             };
 
@@ -1228,6 +1838,11 @@ const plugin = ({ addFilter, utils }) => {
             }
 
             const options = {
+              beforeCreateBlob: query('GET_IMAGE_TRANSFORM_BEFORE_CREATE_BLOB'),
+              afterCreateBlob: query('GET_IMAGE_TRANSFORM_AFTER_CREATE_BLOB'),
+              canvasMemoryLimit: query(
+                'GET_IMAGE_TRANSFORM_CANVAS_MEMORY_LIMIT'
+              ),
               stripImageHead: query(
                 'GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD'
               )
@@ -1305,14 +1920,24 @@ const plugin = ({ addFilter, utils }) => {
       imageTransformVariantsIncludeOriginal: [false, Type.BOOLEAN],
 
       // which name to prefix the original file with
-      imageTransformVariantsOriginalName: ['original_', Type.STRING]
+      imageTransformVariantsOriginalName: ['original_', Type.STRING],
+
+      // called before creating the blob, receives canvas, expects promise resolve with canvas
+      imageTransformBeforeCreateBlob: [null, Type.FUNCTION],
+
+      // expects promise resolved with blob
+      imageTransformAfterCreateBlob: [null, Type.FUNCTION],
+
+      // canvas memory limit
+      imageTransformCanvasMemoryLimit: [
+        isBrowser && isIOS ? 4096 * 4096 : null,
+        Type.INT
+      ]
     }
   };
 };
 
 // fire pluginloaded event if running in browser, this allows registering the plugin when using async script tags
-const isBrowser =
-  typeof window !== 'undefined' && typeof window.document !== 'undefined';
 if (isBrowser) {
   document.dispatchEvent(
     new CustomEvent('FilePond:pluginloaded', { detail: plugin })

@@ -26,6 +26,9 @@ if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
     }
 }
 
+const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+const isIOS = isBrowser && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
 /**
  * Image Transform Plugin
  */
@@ -43,7 +46,7 @@ const plugin = ({ addFilter, utils }) => {
      */
 
     // valid transforms (in correct order)
-    const TRANSFORM_LIST = ['crop', 'resize', 'filter', 'output'];
+    const TRANSFORM_LIST = ['crop', 'resize', 'filter', 'markup' , 'output'];
 
     const createVariantCreator = (updateMetadata) => (transform, file, metadata) => transform(file, updateMetadata ? updateMetadata(metadata) : metadata);
 
@@ -130,7 +133,7 @@ const plugin = ({ addFilter, utils }) => {
                             }
                         });
 
-                    const { resize, exif, output, crop, filter } = filteredMetadata;
+                    const { resize, exif, output, crop, filter, markup } = filteredMetadata;
 
                     const instructions = {
                         image: {
@@ -148,6 +151,7 @@ const plugin = ({ addFilter, utils }) => {
                         crop: crop && !isDefaultCrop(crop) ? {
                             ...crop
                         } : undefined,
+                        markup: markup || [],
                         filter
                     };
 
@@ -166,11 +170,14 @@ const plugin = ({ addFilter, utils }) => {
                     }
 
                     const options = {
+                        beforeCreateBlob: query('GET_IMAGE_TRANSFORM_BEFORE_CREATE_BLOB'),
+                        afterCreateBlob: query('GET_IMAGE_TRANSFORM_AFTER_CREATE_BLOB'),
+                        canvasMemoryLimit: query('GET_IMAGE_TRANSFORM_CANVAS_MEMORY_LIMIT'),
                         stripImageHead: query('GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD')
                     };
 
                     transformImage(file, instructions, options).then(blob => {
-                        
+                    
                         // set file object
                         const out = getFileFromBlob(
                             blob,
@@ -241,14 +248,21 @@ const plugin = ({ addFilter, utils }) => {
             imageTransformVariantsIncludeOriginal: [false, Type.BOOLEAN],
 
             // which name to prefix the original file with
-            imageTransformVariantsOriginalName: ['original_', Type.STRING]
+            imageTransformVariantsOriginalName: ['original_', Type.STRING],
 
+            // called before creating the blob, receives canvas, expects promise resolve with canvas
+            imageTransformBeforeCreateBlob: [null, Type.FUNCTION],
+
+            // expects promise resolved with blob
+            imageTransformAfterCreateBlob: [null, Type.FUNCTION],
+
+            // canvas memory limit
+            imageTransformCanvasMemoryLimit: [isBrowser && isIOS ? 4096 * 4096 : null, Type.INT],
         }
     };
 };
 
 // fire pluginloaded event if running in browser, this allows registering the plugin when using async script tags
-const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
 if (isBrowser) {
     document.dispatchEvent(new CustomEvent('FilePond:pluginloaded', { detail: plugin }));
 }

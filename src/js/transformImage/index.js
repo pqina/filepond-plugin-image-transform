@@ -1,6 +1,6 @@
 import { isImage } from './utils/isImage';
 import { imageToImageData } from './utils/imageToImageData';
-import { imageDataToBlob } from './utils/imageDataToBlob';
+import { canvasToBlob } from './utils/canvasToBlob';
 import { cropSVG } from './utils/cropSVG';
 import { objectToImageData } from './utils/objectToImageData';
 import { TransformWorker } from './utils/TransformWorker';
@@ -8,6 +8,8 @@ import { getImageHead } from './utils/getImageHead';
 import { createBlob } from './utils/createBlob';
 import { createWorker } from './utils/createWorker';
 import { loadImage } from './utils/loadImage';
+import { canvasApplyMarkup } from './utils/canvasApplyMarkup';
+import { imageDataToCanvas } from './utils/imageDataToCanvas';
 
 export const transformImage = (file, instructions, options = {}) => new Promise((resolve, reject) => {
 
@@ -15,10 +17,10 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
     if (!file || !isImage(file)) return reject();
 
     // get separate options for easier use
-    const { stripImageHead, beforeCreateBlob, afterCreateBlob } = options;
+    const { stripImageHead, beforeCreateBlob, afterCreateBlob, canvasMemoryLimit } = options;
 
     // get crop
-    const { crop, size, filter, output } = instructions;
+    const { crop, size, filter, markup, output } = instructions;
 
     // get exif orientation
     const orientation = instructions.image && instructions.image.orientation ? Math.max(1, Math.min(8, instructions.image.orientation)) : null;
@@ -50,30 +52,35 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
     }
 
     // done
-    const toBlob = (imageData, options) => 
-        imageDataToBlob(imageData, options, beforeCreateBlob)
-        .then(blob => {
+    const toBlob = (imageData, options) => {
+        const canvas = imageDataToCanvas(imageData);
+        const promisedCanvas = markup.length ? canvasApplyMarkup(canvas, markup) : canvas;
+        Promise.resolve(promisedCanvas).then(canvas => {
+            canvasToBlob(canvas, options, beforeCreateBlob)
+            .then(blob => {
+        
+                // remove image head (default)
+                if (stripImageHead) return resolveWithBlob(blob);
 
-            // remove image head (default)
-            if (stripImageHead) return resolveWithBlob(blob);
+                // try to copy image head
+                getImageHead(blob).then(imageHead => {
 
-            // try to copy image head
-            getImageHead(file).then(imageHead => {
-
-                // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
-                if (imageHead !== null) {
-                    blob = new Blob([imageHead, blob.slice(20)], { type: blob.type });
-                }
-                
-                // done!
-                resolveWithBlob(blob);
-            });
+                    // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+                    if (imageHead !== null) {
+                        blob = new Blob([imageHead, blob.slice(20)], { type: blob.type });
+                    }
+                    
+                    // done!
+                    resolveWithBlob(blob);
+                });
+            })
+            .catch(reject);
         })
-        .catch(reject);
+    }
 
     // if this is an svg and we want it to stay an svg
     if (/svg/.test(file.type) && type === null) {
-        return cropSVG(file, crop).then(text => {
+        return cropSVG(file, crop, markup).then(text => {
             resolve(
                 createBlob(text, 'image/svg+xml')
             );
@@ -90,7 +97,7 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
         URL.revokeObjectURL(url);
 
         // draw to canvas and start transform chain
-        const imageData = imageToImageData(image, orientation, crop);
+        const imageData = imageToImageData(image, orientation, crop, { canvasMemoryLimit });
 
         // determine the format of the blob that we will output
         const outputFormat = {

@@ -7,7 +7,7 @@ const isFlipped = (flip) => flip && (flip.horizontal || flip.vertical)
 
 const getBitmap = (image, orientation, flip) => {
 
-    if (!orientation && !isFlipped(flip)) {
+    if (orientation <= 1 && !isFlipped(flip)) {
         image.width = image.naturalWidth;
         image.height = image.naturalHeight;
         return image;
@@ -62,8 +62,10 @@ const getBitmap = (image, orientation, flip) => {
   
 };
 
-export const imageToImageData = (imageElement, orientation, crop = {}) => {
+export const imageToImageData = (imageElement, orientation, crop = {}, options = {}) => {
     
+    const { canvasMemoryLimit } = options;
+
     const zoom = crop.zoom || 1;
 
     // fixes possible image orientation problems by drawing the image on the correct canvas
@@ -73,10 +75,22 @@ export const imageToImageData = (imageElement, orientation, crop = {}) => {
         height: bitmap.height
     };
 
-    const canvas = document.createElement('canvas');
+    
     const aspectRatio = crop.aspectRatio || imageSize.height / imageSize.width;
 
-    const canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+    let canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+    
+    if (canvasMemoryLimit) {
+        const requiredMemory = canvasSize.width * canvasSize.height;
+        if (requiredMemory > canvasMemoryLimit) {
+            const scalar = Math.sqrt(canvasMemoryLimit) / Math.sqrt(requiredMemory);
+            imageSize.width = Math.floor(imageSize.width * scalar);
+            imageSize.height = Math.floor(imageSize.height * scalar);
+            canvasSize = calculateCanvasSize(imageSize, aspectRatio, zoom);
+        }
+    }
+
+    const canvas = document.createElement('canvas');
     
     const canvasCenter = {
         x: canvasSize.width * .5,
