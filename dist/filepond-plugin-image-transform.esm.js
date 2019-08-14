@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.4.1
+ * FilePondPluginImageTransform 3.4.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -343,6 +343,34 @@ const canvasToBlob = (canvas, options, beforeCreateBlob = null) =>
     });
   });
 
+const vectorMultiply = (v, amount) =>
+  createVector$1(v.x * amount, v.y * amount);
+
+const vectorAdd = (a, b) => createVector$1(a.x + b.x, a.y + b.y);
+
+const vectorNormalize = v => {
+  const l = Math.sqrt(v.x * v.x + v.y * v.y);
+  if (l === 0) {
+    return {
+      x: 0,
+      y: 0
+    };
+  }
+  return createVector$1(v.x / l, v.y / l);
+};
+
+const vectorRotate = (v, radians, origin) => {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const t = createVector$1(v.x - origin.x, v.y - origin.y);
+  return createVector$1(
+    origin.x + cos * t.x - sin * t.y,
+    origin.y + sin * t.x + cos * t.y
+  );
+};
+
+const createVector$1 = (x = 0, y = 0) => ({ x, y });
+
 const getMarkupValue = (value, size, scalar = 1, axis) => {
   if (typeof value === 'string') {
     return parseFloat(value) * scalar;
@@ -351,6 +379,33 @@ const getMarkupValue = (value, size, scalar = 1, axis) => {
     return value * (axis ? size[axis] : Math.min(size.width, size.height));
   }
   return;
+};
+
+const getMarkupStyles = (markup, size, scale) => {
+  const lineStyle = markup.borderStyle || markup.lineStyle || 'solid';
+  const fill = markup.backgroundColor || markup.fontColor || 'transparent';
+  const stroke = markup.borderColor || markup.lineColor || 'transparent';
+  const strokeWidth = getMarkupValue(
+    markup.borderWidth || markup.lineWidth,
+    size,
+    scale
+  );
+  const lineCap = markup.lineCap || 'round';
+  const lineJoin = markup.lineJoin || 'round';
+  const dashes =
+    typeof lineStyle === 'string'
+      ? ''
+      : lineStyle.map(v => getMarkupValue(v, size, scale)).join(',');
+  const opacity = markup.opacity || 1;
+  return {
+    'stroke-linecap': lineCap,
+    'stroke-linejoin': lineJoin,
+    'stroke-width': strokeWidth || 0,
+    'stroke-dasharray': dashes,
+    stroke,
+    fill,
+    opacity
+  };
 };
 
 const isDefined = value => value != null;
@@ -404,61 +459,6 @@ const getMarkupRect = (rect, size, scalar = 1) => {
     y: top || 0,
     width: width || 0,
     height: height || 0
-  };
-};
-
-const vectorMultiply = (v, amount) =>
-  createVector$1(v.x * amount, v.y * amount);
-
-const vectorAdd = (a, b) => createVector$1(a.x + b.x, a.y + b.y);
-
-const vectorNormalize = v => {
-  const l = Math.sqrt(v.x * v.x + v.y * v.y);
-  if (l === 0) {
-    return {
-      x: 0,
-      y: 0
-    };
-  }
-  return createVector$1(v.x / l, v.y / l);
-};
-
-const vectorRotate = (v, radians, origin) => {
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const t = createVector$1(v.x - origin.x, v.y - origin.y);
-  return createVector$1(
-    origin.x + cos * t.x - sin * t.y,
-    origin.y + sin * t.x + cos * t.y
-  );
-};
-
-const createVector$1 = (x = 0, y = 0) => ({ x, y });
-
-const getMarkupStyles = (markup, size, scale) => {
-  const lineStyle = markup.borderStyle || markup.lineStyle || 'solid';
-  const fill = markup.backgroundColor || markup.fontColor || 'transparent';
-  const stroke = markup.borderColor || markup.lineColor || 'transparent';
-  const strokeWidth = getMarkupValue(
-    markup.borderWidth || markup.lineWidth,
-    size,
-    scale
-  );
-  const lineCap = markup.lineCap || 'round';
-  const lineJoin = markup.lineJoin || 'round';
-  const dashes =
-    typeof lineStyle === 'string'
-      ? ''
-      : lineStyle.map(v => getMarkupValue(v, size, scale)).join(',');
-  const opacity = markup.opacity || 1;
-  return {
-    'stroke-linecap': lineCap,
-    'stroke-linejoin': lineJoin,
-    'stroke-width': strokeWidth || 0,
-    'stroke-dasharray': dashes,
-    stroke,
-    fill,
-    opacity
   };
 };
 
@@ -665,6 +665,8 @@ const updateMarkupByType = (element, type, markup, size, scale) => {
   UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
 };
 
+const sortMarkupByZIndex = (a, b) => (a[1].zIndex > b[1].zIndex ? 1 : -1);
+
 const cropSVG = (blob, crop, markup) =>
   new Promise(resolve => {
     // load blob contents and wrap in crop svg
@@ -716,12 +718,12 @@ const cropSVG = (blob, crop, markup) =>
 
       // markup
       let markupSVG = '';
-      if (markup.length) {
+      if (markup && markup.length) {
         const size = {
           width: imageWidth,
           height: imageHeight
         };
-        markupSVG = markup.reduce((prev, shape) => {
+        markupSVG = markup.sort(sortMarkupByZIndex).reduce((prev, shape) => {
           const el = createMarkupByType(shape[0], shape[1]);
           updateMarkupByType(el, shape[0], shape[1], size);
           el.removeAttribute('id');
@@ -1267,7 +1269,7 @@ const canvasApplyMarkup = (canvas, markup) =>
 
     const ctx = canvas.getContext('2d');
 
-    const drawers = markup.map(item => () =>
+    const drawers = markup.sort(sortMarkupByZIndex).map(item => () =>
       new Promise(resolve => {
         const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve);
         if (result) resolve();

@@ -1,8 +1,8 @@
 import { vectorRotate, vectorNormalize, vectorAdd, vectorMultiply } from './vector';
-
 import { getMarkupValue } from './getMarkupValue';
 import { getMarkupRect } from './getMarkupRect';
 import { getMarkupStyles } from './getMarkupStyles';
+import { sortMarkupByZIndex } from './sortMarkupByZIndex';
 
 const chain = funcs =>
   funcs.reduce((promise, func) =>
@@ -19,7 +19,7 @@ export const canvasApplyMarkup = (canvas, markup) => new Promise((resolve) => {
 
     const ctx = canvas.getContext('2d');
 
-    const drawers = markup.map(item => () => 
+    const drawers = markup.sort(sortMarkupByZIndex).map(item => () => 
         new Promise(resolve => {
             const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve)
             if (result) resolve();

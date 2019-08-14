@@ -1,8 +1,8 @@
 
 import { getImageRectZoomFactor } from './getImageRectZoomFactor';
 import { getCenteredCropRect } from './getCenteredCropRect';
-import { getMarkupRect } from './getMarkupRect';
 import { createMarkupByType, updateMarkupByType } from './markup';
+import { sortMarkupByZIndex } from './sortMarkupByZIndex';
 
 export const cropSVG = (blob, crop, markup) => new Promise(resolve => {
 
@@ -54,12 +54,12 @@ export const cropSVG = (blob, crop, markup) => new Promise(resolve => {
 
         // markup
         let markupSVG = '';
-        if (markup.length) {
+        if (markup && markup.length) {
             const size = {
                 width: imageWidth,
                 height: imageHeight
             };
-            markupSVG = markup.reduce((prev, shape) => {
+            markupSVG = markup.sort(sortMarkupByZIndex).reduce((prev, shape) => {
                 const el = createMarkupByType(shape[0], shape[1]);
                 updateMarkupByType(el, shape[0], shape[1], size);
                 el.removeAttribute('id');

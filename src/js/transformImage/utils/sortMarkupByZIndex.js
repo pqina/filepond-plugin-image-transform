@@ -1,0 +1,1 @@
+export const sortMarkupByZIndex = (a, b) => a[1].zIndex > b[1].zIndex ? 1 : -1;

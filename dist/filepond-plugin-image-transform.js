@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.4.1
+ * FilePondPluginImageTransform 3.4.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -412,6 +412,43 @@
     });
   };
 
+  var vectorMultiply = function vectorMultiply(v, amount) {
+    return createVector$1(v.x * amount, v.y * amount);
+  };
+
+  var vectorAdd = function vectorAdd(a, b) {
+    return createVector$1(a.x + b.x, a.y + b.y);
+  };
+
+  var vectorNormalize = function vectorNormalize(v) {
+    var l = Math.sqrt(v.x * v.x + v.y * v.y);
+    if (l === 0) {
+      return {
+        x: 0,
+        y: 0
+      };
+    }
+    return createVector$1(v.x / l, v.y / l);
+  };
+
+  var vectorRotate = function vectorRotate(v, radians, origin) {
+    var cos = Math.cos(radians);
+    var sin = Math.sin(radians);
+    var t = createVector$1(v.x - origin.x, v.y - origin.y);
+    return createVector$1(
+      origin.x + cos * t.x - sin * t.y,
+      origin.y + sin * t.x + cos * t.y
+    );
+  };
+
+  var createVector$1 = function createVector() {
+    var x =
+      arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 0;
+    var y =
+      arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
+    return { x: x, y: y };
+  };
+
   var getMarkupValue = function getMarkupValue(value, size) {
     var scalar =
       arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : 1;
@@ -423,6 +460,37 @@
       return value * (axis ? size[axis] : Math.min(size.width, size.height));
     }
     return;
+  };
+
+  var getMarkupStyles = function getMarkupStyles(markup, size, scale) {
+    var lineStyle = markup.borderStyle || markup.lineStyle || 'solid';
+    var fill = markup.backgroundColor || markup.fontColor || 'transparent';
+    var stroke = markup.borderColor || markup.lineColor || 'transparent';
+    var strokeWidth = getMarkupValue(
+      markup.borderWidth || markup.lineWidth,
+      size,
+      scale
+    );
+    var lineCap = markup.lineCap || 'round';
+    var lineJoin = markup.lineJoin || 'round';
+    var dashes =
+      typeof lineStyle === 'string'
+        ? ''
+        : lineStyle
+            .map(function(v) {
+              return getMarkupValue(v, size, scale);
+            })
+            .join(',');
+    var opacity = markup.opacity || 1;
+    return {
+      'stroke-linecap': lineCap,
+      'stroke-linejoin': lineJoin,
+      'stroke-width': strokeWidth || 0,
+      'stroke-dasharray': dashes,
+      stroke: stroke,
+      fill: fill,
+      opacity: opacity
+    };
   };
 
   var isDefined = function isDefined(value) {
@@ -481,74 +549,6 @@
       y: top || 0,
       width: width || 0,
       height: height || 0
-    };
-  };
-
-  var vectorMultiply = function vectorMultiply(v, amount) {
-    return createVector$1(v.x * amount, v.y * amount);
-  };
-
-  var vectorAdd = function vectorAdd(a, b) {
-    return createVector$1(a.x + b.x, a.y + b.y);
-  };
-
-  var vectorNormalize = function vectorNormalize(v) {
-    var l = Math.sqrt(v.x * v.x + v.y * v.y);
-    if (l === 0) {
-      return {
-        x: 0,
-        y: 0
-      };
-    }
-    return createVector$1(v.x / l, v.y / l);
-  };
-
-  var vectorRotate = function vectorRotate(v, radians, origin) {
-    var cos = Math.cos(radians);
-    var sin = Math.sin(radians);
-    var t = createVector$1(v.x - origin.x, v.y - origin.y);
-    return createVector$1(
-      origin.x + cos * t.x - sin * t.y,
-      origin.y + sin * t.x + cos * t.y
-    );
-  };
-
-  var createVector$1 = function createVector() {
-    var x =
-      arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 0;
-    var y =
-      arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
-    return { x: x, y: y };
-  };
-
-  var getMarkupStyles = function getMarkupStyles(markup, size, scale) {
-    var lineStyle = markup.borderStyle || markup.lineStyle || 'solid';
-    var fill = markup.backgroundColor || markup.fontColor || 'transparent';
-    var stroke = markup.borderColor || markup.lineColor || 'transparent';
-    var strokeWidth = getMarkupValue(
-      markup.borderWidth || markup.lineWidth,
-      size,
-      scale
-    );
-    var lineCap = markup.lineCap || 'round';
-    var lineJoin = markup.lineJoin || 'round';
-    var dashes =
-      typeof lineStyle === 'string'
-        ? ''
-        : lineStyle
-            .map(function(v) {
-              return getMarkupValue(v, size, scale);
-            })
-            .join(',');
-    var opacity = markup.opacity || 1;
-    return {
-      'stroke-linecap': lineCap,
-      'stroke-linejoin': lineJoin,
-      'stroke-width': strokeWidth || 0,
-      'stroke-dasharray': dashes,
-      stroke: stroke,
-      fill: fill,
-      opacity: opacity
     };
   };
 
@@ -788,6 +788,10 @@
     UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
   };
 
+  var sortMarkupByZIndex = function sortMarkupByZIndex(a, b) {
+    return a[1].zIndex > b[1].zIndex ? 1 : -1;
+  };
+
   var cropSVG = function cropSVG(blob, crop, markup) {
     return new Promise(function(resolve) {
       // load blob contents and wrap in crop svg
@@ -840,21 +844,23 @@
 
         // markup
         var markupSVG = '';
-        if (markup.length) {
+        if (markup && markup.length) {
           var size = {
             width: imageWidth,
             height: imageHeight
           };
 
-          markupSVG = markup.reduce(function(prev, shape) {
-            var el = createMarkupByType(shape[0], shape[1]);
-            updateMarkupByType(el, shape[0], shape[1], size);
-            el.removeAttribute('id');
-            if (el.getAttribute('opacity') === 1) {
-              el.removeAttribute('opacity');
-            }
-            return prev + '\n' + el.outerHTML + '\n';
-          }, '');
+          markupSVG = markup
+            .sort(sortMarkupByZIndex)
+            .reduce(function(prev, shape) {
+              var el = createMarkupByType(shape[0], shape[1]);
+              updateMarkupByType(el, shape[0], shape[1], size);
+              el.removeAttribute('id');
+              if (el.getAttribute('opacity') === 1) {
+                el.removeAttribute('opacity');
+              }
+              return prev + '\n' + el.outerHTML + '\n';
+            }, '');
           markupSVG = '\n\n<g>'.concat(
             markupSVG.replace(/&nbsp;/g, ' '),
             '</g>\n\n'
@@ -1424,7 +1430,7 @@
 
       var ctx = canvas.getContext('2d');
 
-      var drawers = markup.map(function(item) {
+      var drawers = markup.sort(sortMarkupByZIndex).map(function(item) {
         return function() {
           return new Promise(function(resolve) {
             var result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve);
