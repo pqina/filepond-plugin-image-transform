@@ -2,6 +2,7 @@ import { isImage } from './utils/isImage';
 import { renameFileToMatchMimeType } from './utils/renameFileToMatchMimeType';
 import { getValidOutputMimeType } from './utils/getValidOutputMimeType';
 import { transformImage } from './transformImage/index';
+import { prepareMarkup } from './utils/prepareMarkup';
 
 /**
  * Polyfill Edge and IE when in Browser
@@ -151,7 +152,7 @@ const plugin = ({ addFilter, utils }) => {
                         crop: crop && !isDefaultCrop(crop) ? {
                             ...crop
                         } : undefined,
-                        markup: markup || [],
+                        markup: markup && markup.length ? markup.map(prepareMarkup) : [],
                         filter
                     };
 

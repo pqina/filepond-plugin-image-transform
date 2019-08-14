@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.4.2
+ * FilePondPluginImageTransform 3.4.3
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -665,7 +665,15 @@ const updateMarkupByType = (element, type, markup, size, scale) => {
   UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
 };
 
-const sortMarkupByZIndex = (a, b) => (a[1].zIndex > b[1].zIndex ? 1 : -1);
+const sortMarkupByZIndex = (a, b) => {
+  if (a[1].zIndex > b[1].zIndex) {
+    return 1;
+  }
+  if (a[1].zIndex < b[1].zIndex) {
+    return -1;
+  }
+  return 0;
+};
 
 const cropSVG = (blob, crop, markup) =>
   new Promise(resolve => {
@@ -1619,6 +1627,39 @@ const transformImage = (file, instructions, options = {}) =>
     });
   });
 
+const MARKUP_RECT = [
+  'x',
+  'y',
+  'left',
+  'top',
+  'right',
+  'bottom',
+  'width',
+  'height'
+];
+
+const toOptionalFraction = value =>
+  typeof value === 'string' && /%/.test(value)
+    ? parseFloat(value) / 100
+    : value;
+
+// adds default markup properties, clones markup
+const prepareMarkup = markup => {
+  const [type, props] = markup;
+
+  return [
+    type,
+    {
+      zIndex: 0,
+      ...props,
+      ...MARKUP_RECT.reduce((prev, curr) => {
+        prev[curr] = toOptionalFraction(props[curr]);
+        return prev;
+      }, {})
+    }
+  ];
+};
+
 /**
  * Polyfill Edge and IE when in Browser
  */
@@ -1813,7 +1854,7 @@ const plugin = ({ addFilter, utils }) => {
                       ...crop
                     }
                   : undefined,
-              markup: markup || [],
+              markup: markup && markup.length ? markup.map(prepareMarkup) : [],
               filter
             };
 
