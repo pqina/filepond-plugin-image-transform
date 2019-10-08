@@ -4,7 +4,9 @@ import { getCenteredCropRect } from './getCenteredCropRect';
 import { createMarkupByType, updateMarkupByType } from './markup';
 import { sortMarkupByZIndex } from './sortMarkupByZIndex';
 
-export const cropSVG = (blob, crop, markup) => new Promise(resolve => {
+export const cropSVG = (blob, crop, markup, options) => new Promise(resolve => {
+
+    const { background = null } = options;
 
     // load blob contents and wrap in crop svg
     const fr = new FileReader();
@@ -76,6 +78,8 @@ export const cropSVG = (blob, crop, markup) => new Promise(resolve => {
         const canvasWidth = imageWidth;
         const canvasHeight = canvasWidth * aspectRatio;
 
+        const shouldLimit = typeof crop.scaleToFit === 'undefined' || crop.scaleToFit;
+
         const canvasZoomFactor = getImageRectZoomFactor(
             {
                 width: imageWidth, 
@@ -89,7 +93,10 @@ export const cropSVG = (blob, crop, markup) => new Promise(resolve => {
                 aspectRatio
             ),
             crop.rotation,
-            crop.center
+            shouldLimit ? crop.center : {
+                x: .5,
+                y: .5
+            }
         );
 
         const scale = crop.zoom * canvasZoomFactor;
@@ -129,7 +136,7 @@ export const cropSVG = (blob, crop, markup) => new Promise(resolve => {
         // crop
         const transformed = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${canvasWidth}${widthUnits}" height="${canvasHeight}${heightUnits}" 
-viewBox="0 0 ${canvasWidth} ${canvasHeight}" 
+viewBox="0 0 ${canvasWidth} ${canvasHeight}" ${background ? 'style="background:' + background + '" ' : ''}
 preserveAspectRatio="xMinYMin"
 xmlns:xlink="http://www.w3.org/1999/xlink"
 xmlns="http://www.w3.org/2000/svg">

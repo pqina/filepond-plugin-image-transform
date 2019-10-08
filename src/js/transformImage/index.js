@@ -10,11 +10,12 @@ import { createWorker } from './utils/createWorker';
 import { loadImage } from './utils/loadImage';
 import { canvasApplyMarkup } from './utils/canvasApplyMarkup';
 import { imageDataToCanvas } from './utils/imageDataToCanvas';
+import { canvasRelease} from './utils/canvasRelease';
 
 export const transformImage = (file, instructions, options = {}) => new Promise((resolve, reject) => {
 
     // if the file is not an image we do not have any business transforming it
-    if (!file || !isImage(file)) return reject();
+    if (!file || !isImage(file)) return reject({ status: 'not an image file', file });
 
     // get separate options for easier use
     const { stripImageHead, beforeCreateBlob, afterCreateBlob, canvasMemoryLimit } = options;
@@ -32,12 +33,15 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
     // output format
     const type = output && output.type || null;
 
+    // background color
+    const background = output && output.background || null;
+
     // get transforms
     const transforms = [];
 
     // add resize transforms if set
     if (size && (typeof size.width === 'number' || typeof size.height === 'number')) {
-        transforms.push({ type:'resize', data: size });
+        transforms.push({ type: 'resize', data: size });
     }
 
     // add filters
@@ -58,6 +62,9 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
         Promise.resolve(promisedCanvas).then(canvas => {
             canvasToBlob(canvas, options, beforeCreateBlob)
             .then(blob => {
+
+                // force release of canvas memory
+                canvasRelease(canvas);
         
                 // remove image head (default)
                 if (stripImageHead) return resolveWithBlob(blob);
@@ -80,7 +87,7 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
 
     // if this is an svg and we want it to stay an svg
     if (/svg/.test(file.type) && type === null) {
-        return cropSVG(file, crop, markup).then(text => {
+        return cropSVG(file, crop, markup, { background }).then(text => {
             resolve(
                 createBlob(text, 'image/svg+xml')
             );
@@ -91,41 +98,43 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
     const url = URL.createObjectURL(file);
 
     // turn the file into an image
-    loadImage(url).then(image => {
+    loadImage(url)
+        .then(image => {
 
-        // url is no longer needed
-        URL.revokeObjectURL(url);
+            // url is no longer needed
+            URL.revokeObjectURL(url);
 
-        // draw to canvas and start transform chain
-        const imageData = imageToImageData(image, orientation, crop, { canvasMemoryLimit });
+            // draw to canvas and start transform chain
+            const imageData = imageToImageData(image, orientation, crop, { canvasMemoryLimit, background });
 
-        // determine the format of the blob that we will output
-        const outputFormat = {
-            quality,
-            type: type || file.type
-        };
+            // determine the format of the blob that we will output
+            const outputFormat = {
+                quality,
+                type: type || file.type
+            };
 
-        // no transforms necessary, we done!
-        if (!transforms.length) {
-            return toBlob(imageData, outputFormat);
-        }
+            // no transforms necessary, we done!
+            if (!transforms.length) {
+                return toBlob(imageData, outputFormat);
+            }
 
-        // send to the transform worker to transform the blob on a separate thread
-        const worker = createWorker(TransformWorker);
-        worker.post(
-            {
-                transforms,
-                imageData
-            },
-            response => {
+            // send to the transform worker to transform the blob on a separate thread
+            const worker = createWorker(TransformWorker);
+            worker.post(
+                {
+                    transforms,
+                    imageData
+                },
+                response => {
 
-                // finish up
-                toBlob(objectToImageData(response), outputFormat);
+                    // finish up
+                    toBlob(objectToImageData(response), outputFormat);
 
-                // stop worker
-                worker.terminate();
-            },
-            [imageData.data.buffer]
-        );
-    });
+                    // stop worker
+                    worker.terminate();
+                },
+                [imageData.data.buffer]
+            );
+        })
+        .catch(reject);
 })

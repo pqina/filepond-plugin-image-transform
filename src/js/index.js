@@ -259,6 +259,9 @@ const plugin = ({ addFilter, utils }) => {
 
             // canvas memory limit
             imageTransformCanvasMemoryLimit: [isBrowser && isIOS ? 4096 * 4096 : null, Type.INT],
+
+            // background image of the output canvas
+            imageTransformCanvasBackgroundColor: [null, Type.STRING]
         }
     };
 };

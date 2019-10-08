@@ -1,4 +1,3 @@
-
 export const getCenteredCropRect = (container, aspectRatio) => {
 
     let width = container.width;
@@ -13,6 +12,4 @@ export const getCenteredCropRect = (container, aspectRatio) => {
     return {
         x, y, width, height
     }
-
 }
-

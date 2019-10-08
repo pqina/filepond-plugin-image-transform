@@ -25,10 +25,9 @@ const getOffsetPointOnEdge = (length, rotation) => {
     const c = ratio * sinC;
 
     return createVector(cosC * b, cosC * c);
-
 }
 
-const getRotatedRectSize = (rect, rotation) => {
+export const getRotatedRectSize = (rect, rotation) => {
 
     const w = rect.width;
     const h = rect.height;
@@ -58,6 +57,7 @@ const getRotatedRectSize = (rect, rotation) => {
 
 };
 
+
 export const getImageRectZoomFactor = (imageRect, cropRect, rotation = 0, center = { x:.5, y:.5 }) => {
 
     // calculate available space round image center position
@@ -69,7 +69,6 @@ export const getImageRectZoomFactor = (imageRect, cropRect, rotation = 0, center
     // calculate rotated crop rectangle size
     const rotatedCropSize = getRotatedRectSize(cropRect, rotation);
 
-    // calculate scalar required to fit image
     return Math.max(
         rotatedCropSize.width / imageWidth, 
         rotatedCropSize.height / imageHeight

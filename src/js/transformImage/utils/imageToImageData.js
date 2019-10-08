@@ -2,6 +2,7 @@ import { getImageOrientationMatrix } from './getImageOrientationMatrix';
 import { getImageRectZoomFactor } from './getImageRectZoomFactor';
 import { getCenteredCropRect } from './getCenteredCropRect';
 import { calculateCanvasSize } from './calculateCanvasSize';
+import { canvasRelease } from './canvasRelease';
 
 const isFlipped = (flip) => flip && (flip.horizontal || flip.vertical)
 
@@ -64,7 +65,7 @@ const getBitmap = (image, orientation, flip) => {
 
 export const imageToImageData = (imageElement, orientation, crop = {}, options = {}) => {
     
-    const { canvasMemoryLimit } = options;
+    const { canvasMemoryLimit, background = null } = options;
 
     const zoom = crop.zoom || 1;
 
@@ -105,14 +106,14 @@ export const imageToImageData = (imageElement, orientation, crop = {}, options =
         center: canvasCenter
     }
 
-    const stageZoomFactor = getImageRectZoomFactor(
+    const shouldLimit = typeof crop.scaleToFit === 'undefined' || crop.scaleToFit;
+
+    const scale = zoom * getImageRectZoomFactor(
         imageSize,
         getCenteredCropRect(stage, aspectRatio),
         crop.rotation,
-        crop.center
+        shouldLimit ? crop.center : { x:.5, y:.5 }
     );
-    
-    const scale = zoom * stageZoomFactor;
 
     // start drawing
     canvas.width = Math.round(canvasSize.width / scale);
@@ -127,6 +128,10 @@ export const imageToImageData = (imageElement, orientation, crop = {}, options =
     };
     
     const ctx = canvas.getContext('2d');
+    if (background) {
+        ctx.fillStyle = background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     // move to draw offset
     ctx.translate(canvasCenter.x, canvasCenter.y);
@@ -142,5 +147,11 @@ export const imageToImageData = (imageElement, orientation, crop = {}, options =
     );
 
     // get data from canvas
-    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // release canvas
+    canvasRelease(canvas);
+
+    // return data
+    return imageData;
 };

@@ -1,4 +1,5 @@
 import { vectorRotate, vectorNormalize, vectorAdd, vectorMultiply } from './vector';
+
 import { getMarkupValue } from './getMarkupValue';
 import { getMarkupRect } from './getMarkupRect';
 import { getMarkupStyles } from './getMarkupStyles';

@@ -1,4 +1,4 @@
-const correctOrientation = (view, offset, length) => {
+const correctOrientation = (view, offset) => {
 
     // Missing 0x45786966 Marker? No Exif Header, stop here
     if (view.getUint32(offset + 4, false) !== 0x45786966) return;
@@ -60,7 +60,7 @@ const readData = (data) => {
     return data.slice(0, offset);
 }
 
-export const getImageHead = (file) => new Promise((resolve, reject) => {
+export const getImageHead = (file) => new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = () => resolve(readData(reader.result) || null);
     reader.readAsArrayBuffer(file.slice(0, 256 * 1024));

@@ -119,7 +119,6 @@ const getImageRectZoomFactor = (
   // calculate rotated crop rectangle size
   const rotatedCropSize = getRotatedRectSize(cropRect, rotation);
 
-  // calculate scalar required to fit image
   return Math.max(
     rotatedCropSize.width / imageWidth,
     rotatedCropSize.height / imageHeight
@@ -165,6 +164,13 @@ const calculateCanvasSize = (image, canvasAspectRatio, zoom = 1) => {
     width: width,
     height: height
   };
+};
+
+const canvasRelease = canvas => {
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 1, 1);
 };
 
 const isFlipped = flip => flip && (flip.horizontal || flip.vertical);
@@ -231,7 +237,7 @@ const imageToImageData = (
   crop = {},
   options = {}
 ) => {
-  const { canvasMemoryLimit } = options;
+  const { canvasMemoryLimit, background = null } = options;
 
   const zoom = crop.zoom || 1;
 
@@ -271,14 +277,16 @@ const imageToImageData = (
     center: canvasCenter
   };
 
-  const stageZoomFactor = getImageRectZoomFactor(
-    imageSize,
-    getCenteredCropRect(stage, aspectRatio),
-    crop.rotation,
-    crop.center
-  );
+  const shouldLimit = typeof crop.scaleToFit === 'undefined' || crop.scaleToFit;
 
-  const scale = zoom * stageZoomFactor;
+  const scale =
+    zoom *
+    getImageRectZoomFactor(
+      imageSize,
+      getCenteredCropRect(stage, aspectRatio),
+      crop.rotation,
+      shouldLimit ? crop.center : { x: 0.5, y: 0.5 }
+    );
 
   // start drawing
   canvas.width = Math.round(canvasSize.width / scale);
@@ -293,6 +301,10 @@ const imageToImageData = (
   };
 
   const ctx = canvas.getContext('2d');
+  if (background) {
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   // move to draw offset
   ctx.translate(canvasCenter.x, canvasCenter.y);
@@ -308,7 +320,13 @@ const imageToImageData = (
   );
 
   // get data from canvas
-  return ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // release canvas
+  canvasRelease(canvas);
+
+  // return data
+  return imageData;
 };
 
 /**
@@ -675,8 +693,10 @@ const sortMarkupByZIndex = (a, b) => {
   return 0;
 };
 
-const cropSVG = (blob, crop, markup) =>
+const cropSVG = (blob, crop, markup, options) =>
   new Promise(resolve => {
+    const { background = null } = options;
+
     // load blob contents and wrap in crop svg
     const fr = new FileReader();
     fr.onloadend = () => {
@@ -748,6 +768,9 @@ const cropSVG = (blob, crop, markup) =>
       const canvasWidth = imageWidth;
       const canvasHeight = canvasWidth * aspectRatio;
 
+      const shouldLimit =
+        typeof crop.scaleToFit === 'undefined' || crop.scaleToFit;
+
       const canvasZoomFactor = getImageRectZoomFactor(
         {
           width: imageWidth,
@@ -761,7 +784,12 @@ const cropSVG = (blob, crop, markup) =>
           aspectRatio
         ),
         crop.rotation,
-        crop.center
+        shouldLimit
+          ? crop.center
+          : {
+              x: 0.5,
+              y: 0.5
+            }
       );
 
       const scale = crop.zoom * canvasZoomFactor;
@@ -803,7 +831,9 @@ const cropSVG = (blob, crop, markup) =>
       // crop
       const transformed = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="${canvasWidth}${widthUnits}" height="${canvasHeight}${heightUnits}" 
-viewBox="0 0 ${canvasWidth} ${canvasHeight}" 
+viewBox="0 0 ${canvasWidth} ${canvasHeight}" ${
+        background ? 'style="background:' + background + '" ' : ''
+      }
 preserveAspectRatio="xMinYMin"
 xmlns:xlink="http://www.w3.org/1999/xlink"
 xmlns="http://www.w3.org/2000/svg">
@@ -1122,7 +1152,7 @@ const TransformWorker = () => {
 };
 /* javascript-obfuscator:enable */
 
-const correctOrientation = (view, offset, length) => {
+const correctOrientation = (view, offset) => {
   // Missing 0x45786966 Marker? No Exif Header, stop here
   if (view.getUint32(offset + 4, false) !== 0x45786966) return;
 
@@ -1183,7 +1213,7 @@ const readData = data => {
 };
 
 const getImageHead = file =>
-  new Promise((resolve, reject) => {
+  new Promise(resolve => {
     const reader = new FileReader();
     reader.onload = () => resolve(readData(reader.result) || null);
     reader.readAsArrayBuffer(file.slice(0, 256 * 1024));
@@ -1223,15 +1253,19 @@ const createWorker = fn => {
   const workerURL = URL.createObjectURL(workerBlob);
   const worker = new Worker(workerURL);
 
+  const trips = [];
+
   return {
-    transfer: (message, cb) => {},
+    transfer: () => {}, // (message, cb) => {}
     post: (message, cb, transferList) => {
       const id = getUniqueId();
+      trips[id] = cb;
 
       worker.onmessage = e => {
-        if (e.data.id === id) {
-          cb(e.data.message);
-        }
+        const cb = trips[e.data.id];
+        if (!cb) return;
+        cb(e.data.message);
+        delete trips[e.data.id];
       };
 
       worker.postMessage(
@@ -1499,7 +1533,8 @@ const imageDataToCanvas = imageData => {
 const transformImage = (file, instructions, options = {}) =>
   new Promise((resolve, reject) => {
     // if the file is not an image we do not have any business transforming it
-    if (!file || !isImage$1(file)) return reject();
+    if (!file || !isImage$1(file))
+      return reject({ status: 'not an image file', file });
 
     // get separate options for easier use
     const {
@@ -1525,6 +1560,9 @@ const transformImage = (file, instructions, options = {}) =>
 
     // output format
     const type = (output && output.type) || null;
+
+    // background color
+    const background = (output && output.background) || null;
 
     // get transforms
     const transforms = [];
@@ -1557,6 +1595,9 @@ const transformImage = (file, instructions, options = {}) =>
       Promise.resolve(promisedCanvas).then(canvas => {
         canvasToBlob(canvas, options, beforeCreateBlob)
           .then(blob => {
+            // force release of canvas memory
+            canvasRelease(canvas);
+
             // remove image head (default)
             if (stripImageHead) return resolveWithBlob(blob);
 
@@ -1579,7 +1620,7 @@ const transformImage = (file, instructions, options = {}) =>
 
     // if this is an svg and we want it to stay an svg
     if (/svg/.test(file.type) && type === null) {
-      return cropSVG(file, crop, markup).then(text => {
+      return cropSVG(file, crop, markup, { background }).then(text => {
         resolve(createBlob(text, 'image/svg+xml'));
       });
     }
@@ -1588,43 +1629,46 @@ const transformImage = (file, instructions, options = {}) =>
     const url = URL.createObjectURL(file);
 
     // turn the file into an image
-    loadImage(url).then(image => {
-      // url is no longer needed
-      URL.revokeObjectURL(url);
+    loadImage(url)
+      .then(image => {
+        // url is no longer needed
+        URL.revokeObjectURL(url);
 
-      // draw to canvas and start transform chain
-      const imageData = imageToImageData(image, orientation, crop, {
-        canvasMemoryLimit
-      });
+        // draw to canvas and start transform chain
+        const imageData = imageToImageData(image, orientation, crop, {
+          canvasMemoryLimit,
+          background
+        });
 
-      // determine the format of the blob that we will output
-      const outputFormat = {
-        quality,
-        type: type || file.type
-      };
+        // determine the format of the blob that we will output
+        const outputFormat = {
+          quality,
+          type: type || file.type
+        };
 
-      // no transforms necessary, we done!
-      if (!transforms.length) {
-        return toBlob(imageData, outputFormat);
-      }
+        // no transforms necessary, we done!
+        if (!transforms.length) {
+          return toBlob(imageData, outputFormat);
+        }
 
-      // send to the transform worker to transform the blob on a separate thread
-      const worker = createWorker(TransformWorker);
-      worker.post(
-        {
-          transforms,
-          imageData
-        },
-        response => {
-          // finish up
-          toBlob(objectToImageData(response), outputFormat);
+        // send to the transform worker to transform the blob on a separate thread
+        const worker = createWorker(TransformWorker);
+        worker.post(
+          {
+            transforms,
+            imageData
+          },
+          response => {
+            // finish up
+            toBlob(objectToImageData(response), outputFormat);
 
-          // stop worker
-          worker.terminate();
-        },
-        [imageData.data.buffer]
-      );
-    });
+            // stop worker
+            worker.terminate();
+          },
+          [imageData.data.buffer]
+        );
+      })
+      .catch(reject);
   });
 
 const MARKUP_RECT = [
@@ -1975,7 +2019,10 @@ const plugin = ({ addFilter, utils }) => {
       imageTransformCanvasMemoryLimit: [
         isBrowser && isIOS ? 4096 * 4096 : null,
         Type.INT
-      ]
+      ],
+
+      // background image of the output canvas
+      imageTransformCanvasBackgroundColor: [null, Type.STRING]
     }
   };
 };
