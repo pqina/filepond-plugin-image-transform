@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.4.3
+ * FilePondPluginImageTransform 3.5.0
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1881,7 +1881,11 @@ const plugin = ({ addFilter, utils }) => {
               output: output
                 ? {
                     type: output.type,
-                    quality: output.quality ? output.quality * 100 : null
+                    quality: output.quality ? output.quality * 100 : null,
+                    background:
+                      output.background ||
+                      query('GET_IMAGE_TRANSFORM_CANVAS_BACKGROUND_COLOR') ||
+                      null
                   }
                 : undefined,
               size:

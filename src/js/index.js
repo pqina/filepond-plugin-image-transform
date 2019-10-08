@@ -142,7 +142,8 @@ const plugin = ({ addFilter, utils }) => {
                         },
                         output: output ? {
                             type: output.type,
-                            quality: output.quality ? output.quality * 100 : null
+                            quality: output.quality ? output.quality * 100 : null,
+                            background: output.background || query('GET_IMAGE_TRANSFORM_CANVAS_BACKGROUND_COLOR') || null
                         } : undefined,
                         size: (resize && (resize.size.width || resize.size.height)) ? {
                             mode: resize.mode,
