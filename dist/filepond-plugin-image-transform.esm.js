@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.5.0
+ * FilePondPluginImageTransform 3.5.1
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1908,24 +1908,31 @@ const plugin = ({ addFilter, utils }) => {
 
             if (instructions.output) {
               // determine if file type will change
-              const willChangeType = output.type && output.type !== file.type;
+              const willChangeType = output.type
+                ? // type set
+                  output.type !== file.type
+                : // type not set
+                  false;
+
+              const canChangeQuality = /\/jpe?g$/.test(file.type);
+              const willChangeQuality =
+                output.quality !== null
+                  ? // quality set
+                    canChangeQuality && qualityMode === 'always'
+                  : // quality not set
+                    false;
 
               // determine if file data will be modified
               const willModifyImageData = !!(
                 instructions.size ||
                 instructions.crop ||
                 instructions.filter ||
-                willChangeType
+                willChangeType ||
+                willChangeQuality
               );
 
-              // if quality has been set, and quality is optional, and we're not modifying the image data then we don't have to modify the output
-              if (
-                output.quality &&
-                qualityMode === 'optional' &&
-                !willModifyImageData
-              ) {
-                return resolve(file);
-              }
+              // if we're not modifying the image data then we don't have to modify the output
+              if (!willModifyImageData) return resolve(file);
             }
 
             const options = {
