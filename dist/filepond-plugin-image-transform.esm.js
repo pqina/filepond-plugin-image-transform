@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.5.1
+ * FilePondPluginImageTransform 3.5.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1878,16 +1878,23 @@ const plugin = ({ addFilter, utils }) => {
               image: {
                 orientation: exif ? exif.orientation : null
               },
-              output: output
-                ? {
-                    type: output.type,
-                    quality: output.quality ? output.quality * 100 : null,
-                    background:
-                      output.background ||
-                      query('GET_IMAGE_TRANSFORM_CANVAS_BACKGROUND_COLOR') ||
-                      null
-                  }
-                : undefined,
+              output:
+                output &&
+                (output.type ||
+                  typeof output.quality === 'number' ||
+                  output.background)
+                  ? {
+                      type: output.type,
+                      quality:
+                        typeof output.quality === 'number'
+                          ? output.quality * 100
+                          : null,
+                      background:
+                        output.background ||
+                        query('GET_IMAGE_TRANSFORM_CANVAS_BACKGROUND_COLOR') ||
+                        null
+                    }
+                  : undefined,
               size:
                 resize && (resize.size.width || resize.size.height)
                   ? {
