@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.5.2
+ * FilePondPluginImageTransform 3.6.0
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -3579,218 +3579,247 @@
       });
     });
 
-    // subscribe to file transformations
-    addFilter('PREPARE_OUTPUT', function(file, _ref3) {
-      var query = _ref3.query,
-        item = _ref3.item;
+    var shouldTransformFile = function shouldTransformFile(query, file, item) {
       return new Promise(function(resolve) {
-        // if the file is not an image we do not have any business transforming it
         if (
           !isFile(file) ||
           !isImage(file) ||
           !query('GET_ALLOW_IMAGE_TRANSFORM') ||
           item.archived
         ) {
-          return resolve(file);
+          return resolve(false);
         }
 
-        // get variants
-        var variants = [];
-
-        // add original file
-        if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_ORIGINAL')) {
-          variants.push(function() {
-            return new Promise(function(resolve) {
-              resolve({
-                name: query('GET_IMAGE_TRANSFORM_VARIANTS_ORIGINAL_NAME'),
-                file: file
-              });
-            });
-          });
+        var fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
+        if (fn) {
+          var filterResult = fn(file);
+          if (filterResult == null) {
+            // undefined or null
+            return handleRevert(true);
+          }
+          if (typeof filterResult === 'boolean') {
+            return resolve(filterResult);
+          }
+          if (typeof filterResult.then === 'function') {
+            return filterResult.then(resolve);
+          }
         }
+        return resolve(true);
+      });
+    };
 
-        // add default output version if output default set to true or if no variants defined
-        if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_DEFAULT')) {
-          variants.push(function(transform, file, metadata) {
-            return new Promise(function(resolve) {
-              transform(file, metadata).then(function(file) {
-                return resolve({
-                  name: query('GET_IMAGE_TRANSFORM_VARIANTS_DEFAULT_NAME'),
+    // subscribe to file transformations
+    addFilter('PREPARE_OUTPUT', function(file, _ref3) {
+      var query = _ref3.query,
+        item = _ref3.item;
+      return new Promise(function(resolve) {
+        shouldTransformFile(query, file, item).then(function(shouldTransform) {
+          // no need to transform, exit
+          if (!shouldTransform) resolve(file);
+
+          // get variants
+          var variants = [];
+
+          // add original file
+          if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_ORIGINAL')) {
+            variants.push(function() {
+              return new Promise(function(resolve) {
+                resolve({
+                  name: query('GET_IMAGE_TRANSFORM_VARIANTS_ORIGINAL_NAME'),
                   file: file
                 });
               });
             });
-          });
-        }
+          }
 
-        // get other variants
-        var variantsDefinition = query('GET_IMAGE_TRANSFORM_VARIANTS') || {};
-        forin(variantsDefinition, function(key, fn) {
-          var createVariant = createVariantCreator(fn);
-          variants.push(function(transform, file, metadata) {
-            return new Promise(function(resolve) {
-              createVariant(transform, file, metadata).then(function(file) {
-                return resolve({ name: key, file: file });
+          // add default output version if output default set to true or if no variants defined
+          if (query('GET_IMAGE_TRANSFORM_VARIANTS_INCLUDE_DEFAULT')) {
+            variants.push(function(transform, file, metadata) {
+              return new Promise(function(resolve) {
+                transform(file, metadata).then(function(file) {
+                  return resolve({
+                    name: query('GET_IMAGE_TRANSFORM_VARIANTS_DEFAULT_NAME'),
+                    file: file
+                  });
+                });
+              });
+            });
+          }
+
+          // get other variants
+          var variantsDefinition = query('GET_IMAGE_TRANSFORM_VARIANTS') || {};
+          forin(variantsDefinition, function(key, fn) {
+            var createVariant = createVariantCreator(fn);
+            variants.push(function(transform, file, metadata) {
+              return new Promise(function(resolve) {
+                createVariant(transform, file, metadata).then(function(file) {
+                  return resolve({ name: key, file: file });
+                });
               });
             });
           });
-        });
 
-        // output format (quality 0 => 100)
-        var qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
-        var qualityMode = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY_MODE');
-        var quality =
-          qualityAsPercentage === null ? null : qualityAsPercentage / 100;
-        var type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
-        var clientTransforms =
-          query('GET_IMAGE_TRANSFORM_CLIENT_TRANSFORMS') || TRANSFORM_LIST;
+          // output format (quality 0 => 100)
+          var qualityAsPercentage = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY');
+          var qualityMode = query('GET_IMAGE_TRANSFORM_OUTPUT_QUALITY_MODE');
+          var quality =
+            qualityAsPercentage === null ? null : qualityAsPercentage / 100;
+          var type = query('GET_IMAGE_TRANSFORM_OUTPUT_MIME_TYPE');
+          var clientTransforms =
+            query('GET_IMAGE_TRANSFORM_CLIENT_TRANSFORMS') || TRANSFORM_LIST;
 
-        // update transform metadata object
-        item.setMetadata(
-          'output',
-          {
-            type: type,
-            quality: quality,
-            client: clientTransforms
-          },
-          true
-        );
+          // update transform metadata object
+          item.setMetadata(
+            'output',
+            {
+              type: type,
+              quality: quality,
+              client: clientTransforms
+            },
+            true
+          );
 
-        // the function that is used to apply the file transformations
-        var transform = function transform(file, metadata) {
-          return new Promise(function(resolve, reject) {
-            var filteredMetadata = Object.assign({}, metadata);
+          // the function that is used to apply the file transformations
+          var transform = function transform(file, metadata) {
+            return new Promise(function(resolve, reject) {
+              var filteredMetadata = Object.assign({}, metadata);
 
-            Object.keys(filteredMetadata)
-              .filter(function(instruction) {
-                return instruction !== 'exif';
-              })
-              .forEach(function(instruction) {
-                // if not in list, remove from object, the instruction will be handled by the server
-                if (clientTransforms.indexOf(instruction) === -1) {
-                  delete filteredMetadata[instruction];
-                }
-              });
-            var resize = filteredMetadata.resize,
-              exif = filteredMetadata.exif,
-              output = filteredMetadata.output,
-              crop = filteredMetadata.crop,
-              filter = filteredMetadata.filter,
-              markup = filteredMetadata.markup;
+              Object.keys(filteredMetadata)
+                .filter(function(instruction) {
+                  return instruction !== 'exif';
+                })
+                .forEach(function(instruction) {
+                  // if not in list, remove from object, the instruction will be handled by the server
+                  if (clientTransforms.indexOf(instruction) === -1) {
+                    delete filteredMetadata[instruction];
+                  }
+                });
+              var resize = filteredMetadata.resize,
+                exif = filteredMetadata.exif,
+                output = filteredMetadata.output,
+                crop = filteredMetadata.crop,
+                filter = filteredMetadata.filter,
+                markup = filteredMetadata.markup;
 
-            var instructions = {
-              image: {
-                orientation: exif ? exif.orientation : null
-              },
+              var instructions = {
+                image: {
+                  orientation: exif ? exif.orientation : null
+                },
 
-              output:
-                output &&
-                (output.type ||
-                  typeof output.quality === 'number' ||
-                  output.background)
-                  ? {
-                      type: output.type,
-                      quality:
-                        typeof output.quality === 'number'
-                          ? output.quality * 100
-                          : null,
-                      background:
-                        output.background ||
-                        query('GET_IMAGE_TRANSFORM_CANVAS_BACKGROUND_COLOR') ||
-                        null
-                    }
-                  : undefined,
-              size:
-                resize && (resize.size.width || resize.size.height)
-                  ? Object.assign(
-                      {
-                        mode: resize.mode,
-                        upscale: resize.upscale
-                      },
-                      resize.size
-                    )
-                  : undefined,
-              crop:
-                crop && !isDefaultCrop(crop)
-                  ? Object.assign({}, crop)
-                  : undefined,
-              markup: markup && markup.length ? markup.map(prepareMarkup) : [],
-              filter: filter
-            };
+                output:
+                  output &&
+                  (output.type ||
+                    typeof output.quality === 'number' ||
+                    output.background)
+                    ? {
+                        type: output.type,
+                        quality:
+                          typeof output.quality === 'number'
+                            ? output.quality * 100
+                            : null,
+                        background:
+                          output.background ||
+                          query(
+                            'GET_IMAGE_TRANSFORM_CANVAS_BACKGROUND_COLOR'
+                          ) ||
+                          null
+                      }
+                    : undefined,
+                size:
+                  resize && (resize.size.width || resize.size.height)
+                    ? Object.assign(
+                        {
+                          mode: resize.mode,
+                          upscale: resize.upscale
+                        },
+                        resize.size
+                      )
+                    : undefined,
+                crop:
+                  crop && !isDefaultCrop(crop)
+                    ? Object.assign({}, crop)
+                    : undefined,
+                markup:
+                  markup && markup.length ? markup.map(prepareMarkup) : [],
+                filter: filter
+              };
 
-            if (instructions.output) {
-              // determine if file type will change
-              var willChangeType = output.type
-                ? // type set
-                  output.type !== file.type
-                : // type not set
-                  false;
-
-              var canChangeQuality = /\/jpe?g$/.test(file.type);
-              var willChangeQuality =
-                output.quality !== null
-                  ? // quality set
-                    canChangeQuality && qualityMode === 'always'
-                  : // quality not set
+              if (instructions.output) {
+                // determine if file type will change
+                var willChangeType = output.type
+                  ? // type set
+                    output.type !== file.type
+                  : // type not set
                     false;
 
-              // determine if file data will be modified
-              var willModifyImageData = !!(
-                instructions.size ||
-                instructions.crop ||
-                instructions.filter ||
-                willChangeType ||
-                willChangeQuality
-              );
+                var canChangeQuality = /\/jpe?g$/.test(file.type);
+                var willChangeQuality =
+                  output.quality !== null
+                    ? // quality set
+                      canChangeQuality && qualityMode === 'always'
+                    : // quality not set
+                      false;
 
-              // if we're not modifying the image data then we don't have to modify the output
-              if (!willModifyImageData) return resolve(file);
-            }
-
-            var options = {
-              beforeCreateBlob: query('GET_IMAGE_TRANSFORM_BEFORE_CREATE_BLOB'),
-              afterCreateBlob: query('GET_IMAGE_TRANSFORM_AFTER_CREATE_BLOB'),
-              canvasMemoryLimit: query(
-                'GET_IMAGE_TRANSFORM_CANVAS_MEMORY_LIMIT'
-              ),
-              stripImageHead: query(
-                'GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD'
-              )
-            };
-
-            transformImage(file, instructions, options)
-              .then(function(blob) {
-                // set file object
-                var out = getFileFromBlob(
-                  blob,
-                  // rename the original filename to match the mime type of the output image
-                  renameFileToMatchMimeType(
-                    file.name,
-                    getValidOutputMimeType(blob.type)
-                  )
+                // determine if file data will be modified
+                var willModifyImageData = !!(
+                  instructions.size ||
+                  instructions.crop ||
+                  instructions.filter ||
+                  willChangeType ||
+                  willChangeQuality
                 );
 
-                resolve(out);
-              })
-              .catch(reject);
+                // if we're not modifying the image data then we don't have to modify the output
+                if (!willModifyImageData) return resolve(file);
+              }
+
+              var options = {
+                beforeCreateBlob: query(
+                  'GET_IMAGE_TRANSFORM_BEFORE_CREATE_BLOB'
+                ),
+                afterCreateBlob: query('GET_IMAGE_TRANSFORM_AFTER_CREATE_BLOB'),
+                canvasMemoryLimit: query(
+                  'GET_IMAGE_TRANSFORM_CANVAS_MEMORY_LIMIT'
+                ),
+                stripImageHead: query(
+                  'GET_IMAGE_TRANSFORM_OUTPUT_STRIP_IMAGE_HEAD'
+                )
+              };
+
+              transformImage(file, instructions, options)
+                .then(function(blob) {
+                  // set file object
+                  var out = getFileFromBlob(
+                    blob,
+                    // rename the original filename to match the mime type of the output image
+                    renameFileToMatchMimeType(
+                      file.name,
+                      getValidOutputMimeType(blob.type)
+                    )
+                  );
+
+                  resolve(out);
+                })
+                .catch(reject);
+            });
+          };
+
+          // start creating variants
+          var variantPromises = variants.map(function(create) {
+            return create(transform, file, item.getMetadata());
           });
-        };
 
-        // start creating variants
-        var variantPromises = variants.map(function(create) {
-          return create(transform, file, item.getMetadata());
-        });
-
-        // wait for results
-        Promise.all(variantPromises).then(function(files) {
-          // if single file object in array, return the single file object else, return array of
-          resolve(
-            files.length === 1 && files[0].name === null
-              ? // return the File object
-                files[0].file
-              : // return an array of files { name:'name', file:File }
-                files
-          );
+          // wait for results
+          Promise.all(variantPromises).then(function(files) {
+            // if single file object in array, return the single file object else, return array of
+            resolve(
+              files.length === 1 && files[0].name === null
+                ? // return the File object
+                  files[0].file
+                : // return an array of files { name:'name', file:File }
+                  files
+            );
+          });
         });
       });
     });
@@ -3799,6 +3828,9 @@
     return {
       options: {
         allowImageTransform: [true, Type.BOOLEAN],
+
+        // filter images to transform
+        imageTransformImageFilter: [null, Type.FUNCTION],
 
         // null, 'image/jpeg', 'image/png'
         imageTransformOutputMimeType: [null, Type.STRING],
