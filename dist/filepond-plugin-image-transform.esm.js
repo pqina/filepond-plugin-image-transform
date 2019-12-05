@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.6.0
+ * FilePondPluginImageTransform 3.6.1
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1796,6 +1796,7 @@ const plugin = ({ addFilter, utils }) => {
           return filterResult.then(resolve);
         }
       }
+
       return resolve(true);
     });
 
@@ -1806,7 +1807,7 @@ const plugin = ({ addFilter, utils }) => {
       new Promise(resolve => {
         shouldTransformFile(query, file, item).then(shouldTransform => {
           // no need to transform, exit
-          if (!shouldTransform) resolve(file);
+          if (!shouldTransform) return resolve(file);
 
           // get variants
           const variants = [];

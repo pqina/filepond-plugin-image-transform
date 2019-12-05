@@ -88,6 +88,7 @@ const plugin = ({ addFilter, utils }) => {
                 return filterResult.then(resolve);
             }
         }
+
         return resolve(true);
     });
 
@@ -101,7 +102,7 @@ const plugin = ({ addFilter, utils }) => {
                 .then(shouldTransform => {
 
                     // no need to transform, exit
-                    if (!shouldTransform) resolve(file);
+                    if (!shouldTransform) return resolve(file);
 
                     // get variants
                     const variants = [];
