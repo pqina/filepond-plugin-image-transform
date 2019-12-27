@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.6.1
+ * FilePondPluginImageTransform 3.6.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1601,9 +1601,9 @@ const transformImage = (file, instructions, options = {}) =>
             // remove image head (default)
             if (stripImageHead) return resolveWithBlob(blob);
 
-            // try to copy image head
-            getImageHead(blob).then(imageHead => {
-              // re-inject image head EXIF info in case of JPEG, as the image head is removed by canvas export
+            // try to copy image head from original file to generated blob
+            getImageHead(file).then(imageHead => {
+              // re-inject image head in case of JPEG, as the image head is removed by canvas export
               if (imageHead !== null) {
                 blob = new Blob([imageHead, blob.slice(20)], {
                   type: blob.type

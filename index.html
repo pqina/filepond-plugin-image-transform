@@ -34,6 +34,7 @@
 
         // Create the FilePond instance
         const pond = FilePond.create(inputElement, {
+            imageTransformOutputStripImageHead: false,
             imageCropAspectRatio: '1:1',
             imageResizeTargetWidth: 384,
             imageTransformOutputMimeType: 'image/jpeg',
