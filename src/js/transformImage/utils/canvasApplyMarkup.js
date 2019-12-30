@@ -144,6 +144,27 @@ const drawText = (ctx, size, markup) => {
     return true;
 };
 
+const drawPath = (ctx, size, markup) => {
+
+    const styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+    ctx.beginPath();
+
+    const points = markup.points.map(point => ({
+        x: getMarkupValue(point.x, size, 1, 'width'),
+        y: getMarkupValue(point.y, size, 1, 'height')
+    }));
+    
+    ctx.moveTo(points[0].x, points[0].y);
+    const l = points.length;
+    for (let i=1;i<l;i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+    }
+    
+    drawMarkupStyles(ctx, styles);
+    return true;
+}
+
 const drawLine = (ctx, size, markup) => {
 
     const rect = getMarkupRect(markup, size);
@@ -195,9 +216,6 @@ const drawLine = (ctx, size, markup) => {
         ctx.lineTo(arrowEndB.x, arrowEndB.y);
     }
 
-    // ctx.stroke();
-    // ctx.globalAlpha = 1;
-
     drawMarkupStyles(ctx, styles);
     return true;
 }
@@ -207,5 +225,6 @@ const TYPE_DRAW_ROUTES = {
     ellipse: drawEllipse,
     image: drawImage,
     text: drawText,
-    line: drawLine
+    line: drawLine,
+    path: drawPath
 };

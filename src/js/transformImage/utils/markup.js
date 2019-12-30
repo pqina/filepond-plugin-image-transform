@@ -3,6 +3,7 @@ import { vectorRotate, vectorNormalize, vectorAdd, vectorMultiply } from './vect
 import { getMarkupStyles } from './getMarkupStyles';
 import { getMarkupValue } from './getMarkupValue';
 import { getMarkupRect } from './getMarkupRect';
+import { pointsToPathShape } from './pointsToPathShape';
 
 const setAttributes = (element, attr) => Object.keys(attr).forEach(key => element.setAttribute(key, attr[key]));
 
@@ -141,6 +142,17 @@ const updateLine = (element, markup, size, scale) => {
 
 }
 
+const updatePath = (element, markup, size, scale) => {
+    setAttributes(element, {
+        ...element.styles,
+        fill: 'none',
+        'd': pointsToPathShape(markup.points.map(point => ({
+            x: getMarkupValue(point.x, size, scale, 'width'),
+            y: getMarkupValue(point.y, size, scale, 'height')
+        })))
+    });
+}
+
 const createShape = (node) => (markup) => svg(node, { id: markup.id });
 
 const createImage = (markup) => {
@@ -177,12 +189,14 @@ const createLine = (markup) => {
     return shape;
 }
 
+
 const CREATE_TYPE_ROUTES = {
     image: createImage,
     rect: createShape('rect'),
     ellipse: createShape('ellipse'),
     text: createShape('text'),
-    line: createLine
+    path: createShape('path'),
+    line: createLine,
 };
 
 const UPDATE_TYPE_ROUTES = {
@@ -190,13 +204,16 @@ const UPDATE_TYPE_ROUTES = {
     ellipse: updateEllipse,
     image: updateImage,
     text: updateText,
+    path: updatePath,
     line: updateLine
 };
 
 export const createMarkupByType = (type, markup) => CREATE_TYPE_ROUTES[type](markup);
 
 export const updateMarkupByType = (element, type, markup, size, scale) => {
-    element.rect = getMarkupRect(markup, size, scale);
+    if (type !== 'path') {
+        element.rect = getMarkupRect(markup, size, scale);
+    }
     element.styles = getMarkupStyles(markup, size, scale);
     UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
 }

@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.6.2
+ * FilePondPluginImageTransform 3.7.0
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -572,6 +572,17 @@
     };
   };
 
+  var pointsToPathShape = function pointsToPathShape(points) {
+    return points
+      .map(function(point, index) {
+        return ''
+          .concat(index === 0 ? 'M' : 'L', ' ')
+          .concat(point.x, ' ')
+          .concat(point.y);
+      })
+      .join(' ');
+  };
+
   var setAttributes = function setAttributes(element, attr) {
     return Object.keys(attr).forEach(function(key) {
       return element.setAttribute(key, attr[key]);
@@ -732,6 +743,23 @@
     }
   };
 
+  var updatePath = function updatePath(element, markup, size, scale) {
+    setAttributes(
+      element,
+      Object.assign({}, element.styles, {
+        fill: 'none',
+        d: pointsToPathShape(
+          markup.points.map(function(point) {
+            return {
+              x: getMarkupValue(point.x, size, scale, 'width'),
+              y: getMarkupValue(point.y, size, scale, 'height')
+            };
+          })
+        )
+      })
+    );
+  };
+
   var createShape = function createShape(node) {
     return function(markup) {
       return svg(node, { id: markup.id });
@@ -781,6 +809,7 @@
     rect: createShape('rect'),
     ellipse: createShape('ellipse'),
     text: createShape('text'),
+    path: createShape('path'),
     line: createLine
   };
 
@@ -789,6 +818,7 @@
     ellipse: updateEllipse,
     image: updateImage,
     text: updateText,
+    path: updatePath,
     line: updateLine
   };
 
@@ -803,7 +833,9 @@
     size,
     scale
   ) {
-    element.rect = getMarkupRect(markup, size, scale);
+    if (type !== 'path') {
+      element.rect = getMarkupRect(markup, size, scale);
+    }
     element.styles = getMarkupStyles(markup, size, scale);
     UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
   };
@@ -1627,6 +1659,28 @@
     return true;
   };
 
+  var drawPath = function drawPath(ctx, size, markup) {
+    var styles = getMarkupStyles(markup, size);
+    applyMarkupStyles(ctx, styles);
+    ctx.beginPath();
+
+    var points = markup.points.map(function(point) {
+      return {
+        x: getMarkupValue(point.x, size, 1, 'width'),
+        y: getMarkupValue(point.y, size, 1, 'height')
+      };
+    });
+
+    ctx.moveTo(points[0].x, points[0].y);
+    var l = points.length;
+    for (var i = 1; i < l; i++) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+
+    drawMarkupStyles(ctx, styles);
+    return true;
+  };
+
   var drawLine = function drawLine(ctx, size, markup) {
     var rect = getMarkupRect(markup, size);
     var styles = getMarkupStyles(markup, size);
@@ -1675,9 +1729,6 @@
       ctx.lineTo(arrowEndB.x, arrowEndB.y);
     }
 
-    // ctx.stroke();
-    // ctx.globalAlpha = 1;
-
     drawMarkupStyles(ctx, styles);
     return true;
   };
@@ -1687,7 +1738,8 @@
     ellipse: drawEllipse,
     image: drawImage,
     text: drawText,
-    line: drawLine
+    line: drawLine,
+    path: drawPath
   };
 
   var imageDataToCanvas = function imageDataToCanvas(imageData) {
@@ -3482,6 +3534,13 @@
       type = _markup[0],
       props = _markup[1];
 
+    var rect = props.points
+      ? {}
+      : MARKUP_RECT.reduce(function(prev, curr) {
+          prev[curr] = toOptionalFraction(props[curr]);
+          return prev;
+        }, {});
+
     return [
       type,
       Object.assign(
@@ -3489,10 +3548,7 @@
           zIndex: 0
         },
         props,
-        MARKUP_RECT.reduce(function(prev, curr) {
-          prev[curr] = toOptionalFraction(props[curr]);
-          return prev;
-        }, {})
+        rect
       )
     ];
   };

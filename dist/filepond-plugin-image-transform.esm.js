@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.6.2
+ * FilePondPluginImageTransform 3.7.0
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -480,6 +480,11 @@ const getMarkupRect = (rect, size, scalar = 1) => {
   };
 };
 
+const pointsToPathShape = points =>
+  points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+    .join(' ');
+
 const setAttributes = (element, attr) =>
   Object.keys(attr).forEach(key => element.setAttribute(key, attr[key]));
 
@@ -620,6 +625,19 @@ const updateLine = (element, markup, size, scale) => {
   }
 };
 
+const updatePath = (element, markup, size, scale) => {
+  setAttributes(element, {
+    ...element.styles,
+    fill: 'none',
+    d: pointsToPathShape(
+      markup.points.map(point => ({
+        x: getMarkupValue(point.x, size, scale, 'width'),
+        y: getMarkupValue(point.y, size, scale, 'height')
+      }))
+    )
+  });
+};
+
 const createShape = node => markup => svg(node, { id: markup.id });
 
 const createImage = markup => {
@@ -664,6 +682,7 @@ const CREATE_TYPE_ROUTES = {
   rect: createShape('rect'),
   ellipse: createShape('ellipse'),
   text: createShape('text'),
+  path: createShape('path'),
   line: createLine
 };
 
@@ -672,13 +691,16 @@ const UPDATE_TYPE_ROUTES = {
   ellipse: updateEllipse,
   image: updateImage,
   text: updateText,
+  path: updatePath,
   line: updateLine
 };
 
 const createMarkupByType = (type, markup) => CREATE_TYPE_ROUTES[type](markup);
 
 const updateMarkupByType = (element, type, markup, size, scale) => {
-  element.rect = getMarkupRect(markup, size, scale);
+  if (type !== 'path') {
+    element.rect = getMarkupRect(markup, size, scale);
+  }
   element.styles = getMarkupStyles(markup, size, scale);
   UPDATE_TYPE_ROUTES[type](element, markup, size, scale);
 };
@@ -1458,6 +1480,26 @@ const drawText = (ctx, size, markup) => {
   return true;
 };
 
+const drawPath = (ctx, size, markup) => {
+  const styles = getMarkupStyles(markup, size);
+  applyMarkupStyles(ctx, styles);
+  ctx.beginPath();
+
+  const points = markup.points.map(point => ({
+    x: getMarkupValue(point.x, size, 1, 'width'),
+    y: getMarkupValue(point.y, size, 1, 'height')
+  }));
+
+  ctx.moveTo(points[0].x, points[0].y);
+  const l = points.length;
+  for (let i = 1; i < l; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+
+  drawMarkupStyles(ctx, styles);
+  return true;
+};
+
 const drawLine = (ctx, size, markup) => {
   const rect = getMarkupRect(markup, size);
   const styles = getMarkupStyles(markup, size);
@@ -1506,9 +1548,6 @@ const drawLine = (ctx, size, markup) => {
     ctx.lineTo(arrowEndB.x, arrowEndB.y);
   }
 
-  // ctx.stroke();
-  // ctx.globalAlpha = 1;
-
   drawMarkupStyles(ctx, styles);
   return true;
 };
@@ -1518,7 +1557,8 @@ const TYPE_DRAW_ROUTES = {
   ellipse: drawEllipse,
   image: drawImage,
   text: drawText,
-  line: drawLine
+  line: drawLine,
+  path: drawPath
 };
 
 const imageDataToCanvas = imageData => {
@@ -1691,15 +1731,19 @@ const toOptionalFraction = value =>
 const prepareMarkup = markup => {
   const [type, props] = markup;
 
+  const rect = props.points
+    ? {}
+    : MARKUP_RECT.reduce((prev, curr) => {
+        prev[curr] = toOptionalFraction(props[curr]);
+        return prev;
+      }, {});
+
   return [
     type,
     {
       zIndex: 0,
       ...props,
-      ...MARKUP_RECT.reduce((prev, curr) => {
-        prev[curr] = toOptionalFraction(props[curr]);
-        return prev;
-      }, {})
+      ...rect
     }
   ];
 };
