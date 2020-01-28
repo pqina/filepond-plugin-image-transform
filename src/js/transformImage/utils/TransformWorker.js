@@ -58,22 +58,29 @@ export const TransformWorker = () => {
         });
     };
 
-    function applyFilterMatrix(index, data, matrix) {
-        let i=0, row=0, c=0.0,
-        r=data[index] / 255, 
-        g=data[index + 1] / 255, 
-        b=data[index + 2] / 255, 
-        a=data[index + 3] / 255;
-        for (; i<4; i++) {
-            row = 5 * i;
-            c = ((r * matrix[row]) + 
-                (g * matrix[row + 1]) + 
-                (b * matrix[row + 2]) + 
-                (a * matrix[row + 3]) + 
-                (matrix[row + 4])) * 255;
-            data[index + i] = Math.max(0, Math.min(c, 255));
-        }
+    const br = 1.0;
+    const bg = 1.0;
+    const bb = 1.0;
+    function applyFilterMatrix(index, data, m) {
+        const ir = data[index] / 255; 
+        const ig = data[index + 1] / 255;
+        const ib = data[index + 2] / 255; 
+        const ia = data[index + 3] / 255;
+
+        const mr = (ir * m[0]) +  (ig * m[1]) + (ib * m[2]) + (ia * m[3]) + m[4];
+        const mg = (ir * m[5]) +  (ig * m[6]) + (ib * m[7]) + (ia * m[8]) + m[9];
+        const mb = (ir * m[10]) +  (ig * m[11]) + (ib * m[12]) + (ia * m[13]) + m[14];
+        const ma = (ir * m[15]) +  (ig * m[16]) + (ib * m[17]) + (ia * m[18]) + m[19];
+
+        const or = Math.max(0, mr * ma) + (br * (1.0 - ma));
+        const og = Math.max(0, mg * ma) + (bg * (1.0 - ma));
+        const ob = Math.max(0, mb * ma) + (bb * (1.0 - ma));
+
+        data[index] = Math.max(0.0, Math.min(1.0, or)) * 255;
+        data[index + 1] = Math.max(0.0, Math.min(1.0, og)) * 255;
+        data[index + 2] = Math.max(0.0, Math.min(1.0, ob)) * 255;
     }
+
 
     const identityMatrix = self.JSON.stringify([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0]);
     function isIdentityMatrix(filter) {
@@ -111,17 +118,28 @@ export const TransformWorker = () => {
         const m44 = matrix[18];
         const m45 = matrix[19];
 
-        let index=0, r=0.0, g=0.0, b=0.0, a=0.0;
+        let index=0, r=0.0, g=0.0, b=0.0, a=0.0, mr=0.0, mg=0.0, mb=0.0, ma=0.0, or=0.0, og=0.0, ob=0.0;
 
         for (; index<l; index+=4) {
+
             r = data[index] / 255;
             g = data[index + 1] / 255;
             b = data[index + 2] / 255;
             a = data[index + 3] / 255;
-            data[index] = Math.max(0, Math.min(((r * m11) + (g * m12) + (b * m13) + (a * m14) + (m15)) * 255, 255));
-            data[index + 1] = Math.max(0, Math.min(((r * m21) + (g * m22) + (b * m23) + (a * m24) + (m25)) * 255, 255));
-            data[index + 2] = Math.max(0, Math.min(((r * m31) + (g * m32) + (b * m33) + (a * m34) + (m35)) * 255, 255));
-            data[index + 3] = Math.max(0, Math.min(((r * m41) + (g * m42) + (b * m43) + (a * m44) + (m45)) * 255, 255));
+
+            mr = (r * m11) + (g * m12) + (b * m13) + (a * m14) + (m15);
+            mg = (r * m21) + (g * m22) + (b * m23) + (a * m24) + (m25);
+            mb = (r * m31) + (g * m32) + (b * m33) + (a * m34) + (m35);
+            ma = (r * m41) + (g * m42) + (b * m43) + (a * m44) + (m45);
+
+            or = Math.max(0, mr * ma) + (br * (1.0 - ma));
+            og = Math.max(0, mg * ma) + (bg * (1.0 - ma));
+            ob = Math.max(0, mb * ma) + (bb * (1.0 - ma));
+
+            data[index] = Math.max(0.0, Math.min(1.0, or)) * 255;
+            data[index + 1] = Math.max(0.0, Math.min(1.0, og)) * 255;
+            data[index + 2] = Math.max(0.0, Math.min(1.0, ob)) * 255;
+            // don't update alpha value
         }
 
         return imageData;
