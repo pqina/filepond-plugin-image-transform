@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.7.1
+ * FilePondPluginImageTransform 3.7.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -647,6 +647,7 @@ const createImage = markup => {
     'stroke-linejoin': 'round',
     opacity: '0'
   });
+
   shape.onload = () => {
     shape.setAttribute('opacity', markup.opacity || 1);
   };
@@ -715,7 +716,7 @@ const sortMarkupByZIndex = (a, b) => {
   return 0;
 };
 
-const cropSVG = (blob, crop, markup, options) =>
+const cropSVG = (blob, crop = {}, markup, options) =>
   new Promise(resolve => {
     const { background = null } = options;
 
@@ -793,6 +794,9 @@ const cropSVG = (blob, crop, markup, options) =>
       const shouldLimit =
         typeof crop.scaleToFit === 'undefined' || crop.scaleToFit;
 
+      const cropCenterX = crop.center ? crop.center.x : 0.5;
+      const cropCenterY = crop.center ? crop.center.y : 0.5;
+
       const canvasZoomFactor = getImageRectZoomFactor(
         {
           width: imageWidth,
@@ -807,7 +811,7 @@ const cropSVG = (blob, crop, markup, options) =>
         ),
         crop.rotation,
         shouldLimit
-          ? crop.center
+          ? { x: cropCenterX, y: cropCenterY }
           : {
               x: 0.5,
               y: 0.5
@@ -824,8 +828,8 @@ const cropSVG = (blob, crop, markup, options) =>
       };
 
       const imageOffset = {
-        x: canvasCenter.x - imageWidth * crop.center.x,
-        y: canvasCenter.y - imageHeight * crop.center.y
+        x: canvasCenter.x - imageWidth * cropCenterX,
+        y: canvasCenter.y - imageHeight * cropCenterY
       };
 
       const cropTransforms = [
@@ -841,12 +845,13 @@ const cropSVG = (blob, crop, markup, options) =>
         `translate(${imageOffset.x} ${imageOffset.y})`
       ];
 
+      const cropFlipHorizontal = crop.flip && crop.flip.horizontal;
+      const cropFlipVertical = crop.flip && crop.flip.vertical;
+
       const flipTransforms = [
-        `scale(${crop.flip.horizontal ? -1 : 1} ${
-          crop.flip.vertical ? -1 : 1
-        })`,
-        `translate(${crop.flip.horizontal ? -imageWidth : 0} ${
-          crop.flip.vertical ? -imageHeight : 0
+        `scale(${cropFlipHorizontal ? -1 : 1} ${cropFlipVertical ? -1 : 1})`,
+        `translate(${cropFlipHorizontal ? -imageWidth : 0} ${
+          cropFlipVertical ? -imageHeight : 0
         })`
       ];
 

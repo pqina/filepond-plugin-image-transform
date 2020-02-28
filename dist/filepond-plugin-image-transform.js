@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.7.1
+ * FilePondPluginImageTransform 3.7.2
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -850,7 +850,11 @@
     return 0;
   };
 
-  var cropSVG = function cropSVG(blob, crop, markup, options) {
+  var cropSVG = function cropSVG(blob) {
+    var crop =
+      arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+    var markup = arguments.length > 2 ? arguments[2] : undefined;
+    var options = arguments.length > 3 ? arguments[3] : undefined;
     return new Promise(function(resolve) {
       var _options$background = options.background,
         background =
@@ -937,6 +941,9 @@
         var shouldLimit =
           typeof crop.scaleToFit === 'undefined' || crop.scaleToFit;
 
+        var cropCenterX = crop.center ? crop.center.x : 0.5;
+        var cropCenterY = crop.center ? crop.center.y : 0.5;
+
         var canvasZoomFactor = getImageRectZoomFactor(
           {
             width: imageWidth,
@@ -954,7 +961,7 @@
 
           crop.rotation,
           shouldLimit
-            ? crop.center
+            ? { x: cropCenterX, y: cropCenterY }
             : {
                 x: 0.5,
                 y: 0.5
@@ -971,8 +978,8 @@
         };
 
         var imageOffset = {
-          x: canvasCenter.x - imageWidth * crop.center.x,
-          y: canvasCenter.y - imageHeight * crop.center.y
+          x: canvasCenter.x - imageWidth * cropCenterX,
+          y: canvasCenter.y - imageHeight * cropCenterY
         };
 
         var cropTransforms = [
@@ -993,13 +1000,16 @@
           'translate('.concat(imageOffset.x, ' ').concat(imageOffset.y, ')')
         ];
 
+        var cropFlipHorizontal = crop.flip && crop.flip.horizontal;
+        var cropFlipVertical = crop.flip && crop.flip.vertical;
+
         var flipTransforms = [
           'scale('
-            .concat(crop.flip.horizontal ? -1 : 1, ' ')
-            .concat(crop.flip.vertical ? -1 : 1, ')'),
+            .concat(cropFlipHorizontal ? -1 : 1, ' ')
+            .concat(cropFlipVertical ? -1 : 1, ')'),
           'translate('
-            .concat(crop.flip.horizontal ? -imageWidth : 0, ' ')
-            .concat(crop.flip.vertical ? -imageHeight : 0, ')')
+            .concat(cropFlipHorizontal ? -imageWidth : 0, ' ')
+            .concat(cropFlipVertical ? -imageHeight : 0, ')')
         ];
 
         // crop
