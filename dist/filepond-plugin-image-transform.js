@@ -3570,6 +3570,35 @@
     ];
   };
 
+  var getImageSize = function getImageSize(file) {
+    return new Promise(function(resolve, reject) {
+      var imageElement = new Image();
+      imageElement.src = URL.createObjectURL(file);
+
+      // start testing size
+      var measure = function measure() {
+        var width = imageElement.naturalWidth;
+        var height = imageElement.naturalHeight;
+        var hasSize = width && height;
+        if (!hasSize) return;
+
+        URL.revokeObjectURL(imageElement.src);
+        clearInterval(intervalId);
+        resolve({ width: width, height: height });
+      };
+
+      imageElement.onerror = function(err) {
+        URL.revokeObjectURL(imageElement.src);
+        clearInterval(intervalId);
+        reject(err);
+      };
+
+      var intervalId = setInterval(measure, 1);
+
+      measure();
+    });
+  };
+
   /**
    * Polyfill Edge and IE when in Browser
    */
@@ -3655,30 +3684,37 @@
     var shouldTransformFile = function shouldTransformFile(query, file, item) {
       return new Promise(function(resolve) {
         if (
-          !isFile(file) ||
-          !isImage(file) ||
           !query('GET_ALLOW_IMAGE_TRANSFORM') ||
-          item.archived
+          item.archived ||
+          !isFile(file) ||
+          !isImage(file)
         ) {
           return resolve(false);
         }
 
-        var fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
-        if (fn) {
-          var filterResult = fn(file);
-          if (filterResult == null) {
-            // undefined or null
-            return handleRevert(true);
-          }
-          if (typeof filterResult === 'boolean') {
-            return resolve(filterResult);
-          }
-          if (typeof filterResult.then === 'function') {
-            return filterResult.then(resolve);
-          }
-        }
+        // if size can't be read this browser doesn't support image
+        getImageSize(file)
+          .then(function() {
+            var fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
+            if (fn) {
+              var filterResult = fn(file);
+              if (filterResult == null) {
+                // undefined or null
+                return handleRevert(true);
+              }
+              if (typeof filterResult === 'boolean') {
+                return resolve(filterResult);
+              }
+              if (typeof filterResult.then === 'function') {
+                return filterResult.then(resolve);
+              }
+            }
 
-        return resolve(true);
+            resolve(true);
+          })
+          .catch(function(err) {
+            resolve(false);
+          });
       });
     };
 

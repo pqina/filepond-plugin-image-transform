@@ -647,7 +647,6 @@ const createImage = markup => {
     'stroke-linejoin': 'round',
     opacity: '0'
   });
-
   shape.onload = () => {
     shape.setAttribute('opacity', markup.opacity || 1);
   };
@@ -1760,6 +1759,34 @@ const prepareMarkup = markup => {
   ];
 };
 
+const getImageSize = file =>
+  new Promise((resolve, reject) => {
+    const imageElement = new Image();
+    imageElement.src = URL.createObjectURL(file);
+
+    // start testing size
+    const measure = () => {
+      const width = imageElement.naturalWidth;
+      const height = imageElement.naturalHeight;
+      const hasSize = width && height;
+      if (!hasSize) return;
+
+      URL.revokeObjectURL(imageElement.src);
+      clearInterval(intervalId);
+      resolve({ width, height });
+    };
+
+    imageElement.onerror = err => {
+      URL.revokeObjectURL(imageElement.src);
+      clearInterval(intervalId);
+      reject(err);
+    };
+
+    const intervalId = setInterval(measure, 1);
+
+    measure();
+  });
+
 /**
  * Polyfill Edge and IE when in Browser
  */
@@ -1830,30 +1857,37 @@ const plugin = ({ addFilter, utils }) => {
   const shouldTransformFile = (query, file, item) =>
     new Promise(resolve => {
       if (
-        !isFile(file) ||
-        !isImage(file) ||
         !query('GET_ALLOW_IMAGE_TRANSFORM') ||
-        item.archived
+        item.archived ||
+        !isFile(file) ||
+        !isImage(file)
       ) {
         return resolve(false);
       }
 
-      const fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
-      if (fn) {
-        const filterResult = fn(file);
-        if (filterResult == null) {
-          // undefined or null
-          return handleRevert(true);
-        }
-        if (typeof filterResult === 'boolean') {
-          return resolve(filterResult);
-        }
-        if (typeof filterResult.then === 'function') {
-          return filterResult.then(resolve);
-        }
-      }
+      // if size can't be read this browser doesn't support image
+      getImageSize(file)
+        .then(() => {
+          const fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
+          if (fn) {
+            const filterResult = fn(file);
+            if (filterResult == null) {
+              // undefined or null
+              return handleRevert(true);
+            }
+            if (typeof filterResult === 'boolean') {
+              return resolve(filterResult);
+            }
+            if (typeof filterResult.then === 'function') {
+              return filterResult.then(resolve);
+            }
+          }
 
-      return resolve(true);
+          resolve(true);
+        })
+        .catch(err => {
+          resolve(false);
+        });
     });
 
   // subscribe to file transformations

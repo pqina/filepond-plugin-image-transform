@@ -3,6 +3,7 @@ import { renameFileToMatchMimeType } from './utils/renameFileToMatchMimeType';
 import { getValidOutputMimeType } from './utils/getValidOutputMimeType';
 import { transformImage } from './transformImage/index';
 import { prepareMarkup } from './utils/prepareMarkup';
+import { getImageSize } from './transformImage/utils/getImageSize';
 
 /**
  * Polyfill Edge and IE when in Browser
@@ -71,25 +72,33 @@ const plugin = ({ addFilter, utils }) => {
 
     const shouldTransformFile = (query, file, item) => new Promise(resolve => {
 
-        if (!isFile(file) || !isImage(file) || !query('GET_ALLOW_IMAGE_TRANSFORM') || item.archived) {
+        if (!query('GET_ALLOW_IMAGE_TRANSFORM') || item.archived || !isFile(file) || !isImage(file)) {
             return resolve(false);
         }
+        
+        // if size can't be read this browser doesn't support image
+        getImageSize(file)
+            .then(() => {
+                
+                const fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
+                if (fn) {
+                    const filterResult = fn(file);
+                    if (filterResult == null) { // undefined or null
+                        return handleRevert(true);
+                    }
+                    if (typeof filterResult === 'boolean') {
+                        return resolve(filterResult);
+                    }
+                    if (typeof filterResult.then === 'function') {
+                        return filterResult.then(resolve);
+                    }
+                }
+        
+                resolve(true);
 
-        const fn = query('GET_IMAGE_TRANSFORM_IMAGE_FILTER');
-        if (fn) {
-            const filterResult = fn(file);
-            if (filterResult == null) { // undefined or null
-                return handleRevert(true);
-            }
-            if (typeof filterResult === 'boolean') {
-                return resolve(filterResult);
-            }
-            if (typeof filterResult.then === 'function') {
-                return filterResult.then(resolve);
-            }
-        }
+            })
+            .catch(err => { resolve(false) })
 
-        return resolve(true);
     });
 
     // subscribe to file transformations
@@ -249,8 +258,6 @@ const plugin = ({ addFilter, utils }) => {
                         );
 
                     });
-
-
 
                 });
 
