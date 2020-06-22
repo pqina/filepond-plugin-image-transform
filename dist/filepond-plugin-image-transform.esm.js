@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.7.3
+ * FilePondPluginImageTransform 3.7.4
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1415,6 +1415,12 @@ const drawImage = (ctx, size, markup, done) => {
   applyMarkupStyles(ctx, styles);
 
   const image = new Image();
+
+  // if is cross origin image add cross origin attribute
+  const isCrossOriginImage =
+    new URL(markup.src, window.location.href).origin !== window.location.origin;
+  if (isCrossOriginImage) image.crossOrigin = '';
+
   image.onload = () => {
     if (markup.fit === 'cover') {
       const ar = rect.width / rect.height;

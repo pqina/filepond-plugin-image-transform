@@ -92,6 +92,11 @@ const drawImage = (ctx, size, markup, done) => {
     applyMarkupStyles(ctx, styles);
 
     const image = new Image();
+
+    // if is cross origin image add cross origin attribute
+    const isCrossOriginImage = new URL(markup.src, window.location.href).origin !== window.location.origin;
+    if (isCrossOriginImage) image.crossOrigin = '';
+
     image.onload = () => {
         if (markup.fit === 'cover') {
             const ar = rect.width / rect.height;
