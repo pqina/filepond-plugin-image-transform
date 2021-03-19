@@ -1,7 +1,8 @@
-declare module "filepond-plugin-image-transform" {
-  const FilePondPluginImageTransformProps: FilePondPluginImageTransformProps;
+// @ts-ignore
+import { FilePondOptions } from "filepond";
 
-  export interface FilePondPluginImageTransformProps {
+declare module "filepond" {
+  export interface FilePondOptions {
     allowImageTransform?: boolean;
 
     /** filter images to transform */
@@ -49,5 +50,4 @@ declare module "filepond-plugin-image-transform" {
     /** background image of the output canvas */
     imageTransformCanvasBackgroundColor?: string | null;
   }
-  export default FilePondPluginImageTransformProps;
 }
