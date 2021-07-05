@@ -29,7 +29,7 @@ if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
 }
 
 const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-const isIOS = isBrowser && /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+const isIOS = isBrowser && /iPad|iPhone|iPod|SamsungBrowser/.test(navigator.userAgent) && !window.MSStream;
 
 /**
  * Image Transform Plugin
