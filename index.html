@@ -1,69 +1,77 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FilePond Plugin Image Transform Demo</title>
-    <link href="https://unpkg.com/filepond/dist/filepond.css" rel="stylesheet">
-</head>
-<body>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>FilePond Plugin Image Transform Demo</title>
+        <link href="https://unpkg.com/filepond/dist/filepond.css" rel="stylesheet" />
+    </head>
+    <body>
+        <input type="file" />
 
-    <input type="file"/>
-    
-    <img src="" class="output"/>
+        <img src="" class="output" />
 
-    <script src="./dist/filepond-plugin-image-transform.js"></script>
-    <script src="https://unpkg.com/filepond-plugin-image-exif-orientation/dist/filepond-plugin-image-exif-orientation.js"></script>
-    <script src="https://unpkg.com/filepond-plugin-image-crop/dist/filepond-plugin-image-crop.js"></script>
-    <script src="https://unpkg.com/filepond-plugin-image-resize/dist/filepond-plugin-image-resize.js"></script>
-    <script src="https://unpkg.com/filepond-plugin-file-metadata/dist/filepond-plugin-file-metadata.js"></script>
-    <script src="https://unpkg.com/filepond/dist/filepond.js"></script>
-    
-    <script>
-        // Register the plugin with FilePond
-        FilePond.registerPlugin(
-            FilePondPluginImageExifOrientation,
-            FilePondPluginImageCrop,
-            FilePondPluginImageResize,
-            FilePondPluginFileMetadata,
-            FilePondPluginImageTransform
-        );
+        <script src="./dist/filepond-plugin-image-transform.js"></script>
+        <script src="https://unpkg.com/filepond-plugin-image-exif-orientation/dist/filepond-plugin-image-exif-orientation.js"></script>
+        <script src="https://unpkg.com/filepond-plugin-image-crop/dist/filepond-plugin-image-crop.js"></script>
+        <script src="https://unpkg.com/filepond-plugin-image-resize/dist/filepond-plugin-image-resize.js"></script>
+        <script src="https://unpkg.com/filepond-plugin-file-metadata/dist/filepond-plugin-file-metadata.js"></script>
+        <script src="https://unpkg.com/filepond/dist/filepond.js"></script>
 
-        // Get a reference to the file input element
-        const inputElement = document.querySelector('input[type="file"]');
+        <script>
+            // Register the plugin with FilePond
+            FilePond.registerPlugin(
+                FilePondPluginImageExifOrientation,
+                FilePondPluginImageCrop,
+                FilePondPluginImageResize,
+                FilePondPluginFileMetadata,
+                FilePondPluginImageTransform
+            );
 
-        // Create the FilePond instance
-        const pond = FilePond.create(inputElement, {
-            imageCropAspectRatio: '1:1',
-            imageResizeTargetWidth: 384,
-            onpreparefile: (file, output) => {
-                document.querySelector('img.output').src = URL.createObjectURL(output);
-            },
-            fileMetadataObject: {
-                'markup': [
-                    [
-                        'rect', {
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            height: '60px',
-                            backgroundColor: 'rgba(0,0,0,.5)'
-                        },
+            // Get a reference to the file input element
+            const inputElement = document.querySelector('input[type="file"]');
+
+            // Create the FilePond instance
+            const pond = FilePond.create(inputElement, {
+                imageCropAspectRatio: '1:1',
+                imageResizeTargetWidth: 384,
+
+                imageResizeMode: 'cover',
+                imageResizeTargetHeight: 300,
+                imageResizeTargetWidth: 300,
+                imageResizeUpscale: false,
+
+                onpreparefile: (file, output) => {
+                    document.querySelector('img.output').src = URL.createObjectURL(output);
+                },
+                fileMetadataObject: {
+                    markup: [
+                        [
+                            'rect',
+                            {
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                height: '60px',
+                                backgroundColor: 'rgba(0,0,0,.5)',
+                            },
+                        ],
+                        [
+                            'image',
+                            {
+                                right: '10px',
+                                bottom: '10px',
+                                width: '128px',
+                                height: '34px',
+                                src: './filepond-logo.svg',
+                                fit: 'contain',
+                            },
+                        ],
                     ],
-                    [
-                        'image', {
-                            right: '10px',
-                            bottom: '10px',
-                            width: '128px',
-                            height: '34px',
-                            src: './filepond-logo.svg',
-                            fit: 'contain'
-                        }
-                    ]
-                ]
-            },
-        });
-    </script>
+                },
+            });
 
-</body>
+            pond.addFile('mountains.jpeg');
+        </script>
+    </body>
 </html>
