@@ -1,5 +1,5 @@
 /*!
- * FilePondPluginImageTransform 3.7.6
+ * FilePondPluginImageTransform 3.8.6
  * Licensed under MIT, https://opensource.org/licenses/MIT/
  * Please visit https://pqina.nl/filepond/ for details.
  */
@@ -1796,17 +1796,14 @@ const plugin = ({ addFilter, utils }) => {
 
         item.extend(
             'requestPrepare',
-            cb =>
+            () =>
                 new Promise((resolve, reject) => {
                     dispatch(
                         'REQUEST_PREPARE_OUTPUT',
                         {
                             query: item.id,
                             item,
-                            success: file => {
-                                console.log(file);
-                                resolve(file);
-                            },
+                            success: resolve,
                             failure: reject,
                         },
                         true

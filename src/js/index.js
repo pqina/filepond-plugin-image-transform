@@ -111,17 +111,14 @@ const plugin = ({ addFilter, utils }) => {
 
         item.extend(
             'requestPrepare',
-            cb =>
+            () =>
                 new Promise((resolve, reject) => {
                     dispatch(
                         'REQUEST_PREPARE_OUTPUT',
                         {
                             query: item.id,
                             item,
-                            success: file => {
-                                console.log(file);
-                                resolve(file);
-                            },
+                            success: resolve,
                             failure: reject,
                         },
                         true

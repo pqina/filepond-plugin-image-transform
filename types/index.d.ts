@@ -1,53 +1,57 @@
 // @ts-ignore
-import { FilePondOptions } from "filepond";
+import { FilePondOptions, FilePondFile } from 'filepond';
 
-declare module "filepond" {
-  export interface FilePondOptions {
-    allowImageTransform?: boolean;
+declare module 'filepond' {
+    export class FilePondFile {
+        requestPrepare: () => Promise<Blob>;
+    }
 
-    /** filter images to transform */
-    imageTransformImageFilter?: Function | null;
+    export interface FilePondOptions {
+        allowImageTransform?: boolean;
 
-    /** 'image/jpeg', 'image/png', etc. */
-    imageTransformOutputMimeType?: string | null;
+        /** filter images to transform */
+        imageTransformImageFilter?: Function | null;
 
-    /** 0 - 100 */
-    imageTransformOutputQuality?: number | null;
+        /** 'image/jpeg', 'image/png', etc. */
+        imageTransformOutputMimeType?: string | null;
 
-    /** set to false to copy image exif data to output */
-    imageTransformOutputStripImageHead?: boolean;
+        /** 0 - 100 */
+        imageTransformOutputQuality?: number | null;
 
-    /** only apply transforms in this list */
-    imageTransformClientTransforms?: any[] | null;
+        /** set to false to copy image exif data to output */
+        imageTransformOutputStripImageHead?: boolean;
 
-    /** only apply output quality when a transform is required */
-    imageTransformOutputQualityMode?: "always" | "optional";
+        /** only apply transforms in this list */
+        imageTransformClientTransforms?: any[] | null;
 
-    /** get image transform variants */
-    imageTransformVariants?: any | null;
+        /** only apply output quality when a transform is required */
+        imageTransformOutputQualityMode?: 'always' | 'optional';
 
-    /** should we post the default transformed file */
-    imageTransformVariantsIncludeDefault?: boolean;
+        /** get image transform variants */
+        imageTransformVariants?: any | null;
 
-    /** which name to prefix the default transformed file with */
-    imageTransformVariantsDefaultName?: string | null;
+        /** should we post the default transformed file */
+        imageTransformVariantsIncludeDefault?: boolean;
 
-    /** should we post the original file */
-    imageTransformVariantsIncludeOriginal?: boolean;
+        /** which name to prefix the default transformed file with */
+        imageTransformVariantsDefaultName?: string | null;
 
-    /** which name to prefix the original file with */
-    imageTransformVariantsOriginalName?: string;
+        /** should we post the original file */
+        imageTransformVariantsIncludeOriginal?: boolean;
 
-    /** called before creating the blob, receives canvas, expects promise resolve with canvas */
-    imageTransformBeforeCreateBlob?: Function | null;
+        /** which name to prefix the original file with */
+        imageTransformVariantsOriginalName?: string;
 
-    /** expects promise resolved with blob */
-    imageTransformAfterCreateBlob?: Function | null;
+        /** called before creating the blob, receives canvas, expects promise resolve with canvas */
+        imageTransformBeforeCreateBlob?: Function | null;
 
-    /** canvas memory limit */
-    imageTransformCanvasMemoryLimit?: number | null;
+        /** expects promise resolved with blob */
+        imageTransformAfterCreateBlob?: Function | null;
 
-    /** background image of the output canvas */
-    imageTransformCanvasBackgroundColor?: string | null;
-  }
+        /** canvas memory limit */
+        imageTransformCanvasMemoryLimit?: number | null;
+
+        /** background image of the output canvas */
+        imageTransformCanvasBackgroundColor?: string | null;
+    }
 }
