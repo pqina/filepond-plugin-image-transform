@@ -2,7 +2,7 @@
 import { FilePondOptions, FilePondFile } from 'filepond';
 
 declare module 'filepond' {
-    export class FilePondFile {
+    export interface FilePondFile {
         requestPrepare: () => Promise<Blob>;
     }
 
