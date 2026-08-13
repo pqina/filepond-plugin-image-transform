@@ -178,7 +178,13 @@ const plugin = ({ addFilter, utils }) => {
                                 new Promise(resolve => {
                                     createVariant(transform, file, metadata).then(file =>
                                         resolve({ name: key, file })
-                                    );
+                                    ).catch((err)=> {       
+                                        item.fire('load-file-error', {
+                                            status: {
+                                                body: err
+                                            }
+                                        })
+                                    });
                                 })
                         );
                     });

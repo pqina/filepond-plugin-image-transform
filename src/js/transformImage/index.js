@@ -82,7 +82,7 @@ export const transformImage = (file, instructions, options = {}) => new Promise(
                 });
             })
             .catch(reject);
-        })
+        }).catch(reject);
     }
 
     // if this is an svg and we want it to stay an svg

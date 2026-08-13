@@ -11,7 +11,7 @@ const chain = funcs =>
       func().then(Array.prototype.concat.bind(result))),
       Promise.resolve([]))
 
-export const canvasApplyMarkup = (canvas, markup) => new Promise((resolve) => {
+export const canvasApplyMarkup = (canvas, markup) => new Promise((resolve, reject) => {
 
     const size = {
         width: canvas.width,
@@ -22,12 +22,12 @@ export const canvasApplyMarkup = (canvas, markup) => new Promise((resolve) => {
 
     const drawers = markup.sort(sortMarkupByZIndex).map(item => () => 
         new Promise(resolve => {
-            const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve)
+            const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve, reject)
             if (result) resolve();
         })
     );
 
-    chain(drawers).then(() => resolve(canvas))
+    chain(drawers).then(() => resolve(canvas)).catch(reject);
 });
 
 const applyMarkupStyles = (ctx, styles) => {
@@ -85,7 +85,7 @@ const drawEllipse = (ctx, size, markup) => {
     return true;
 }
 
-const drawImage = (ctx, size, markup, done) => {
+const drawImage = (ctx, size, markup, done, error) => {
 
     const rect = getMarkupRect(markup, size);
     const styles = getMarkupStyles(markup, size);
@@ -127,6 +127,11 @@ const drawImage = (ctx, size, markup, done) => {
         drawMarkupStyles(ctx, styles);
         done();
     };
+
+    image.onerror = () => {
+        error('Error loading markup ' + markup.src);
+    };
+
     image.src = markup.src;
 }
     

@@ -1281,7 +1281,7 @@ const chain = funcs =>
     );
 
 const canvasApplyMarkup = (canvas, markup) =>
-    new Promise(resolve => {
+    new Promise((resolve, reject) => {
         const size = {
             width: canvas.width,
             height: canvas.height,
@@ -1291,12 +1291,14 @@ const canvasApplyMarkup = (canvas, markup) =>
 
         const drawers = markup.sort(sortMarkupByZIndex).map(item => () =>
             new Promise(resolve => {
-                const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve);
+                const result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve, reject);
                 if (result) resolve();
             })
         );
 
-        chain(drawers).then(() => resolve(canvas));
+        chain(drawers)
+            .then(() => resolve(canvas))
+            .catch(reject);
     });
 
 const applyMarkupStyles = (ctx, styles) => {
@@ -1354,7 +1356,7 @@ const drawEllipse = (ctx, size, markup) => {
     return true;
 };
 
-const drawImage = (ctx, size, markup, done) => {
+const drawImage = (ctx, size, markup, done, error) => {
     const rect = getMarkupRect(markup, size);
     const styles = getMarkupStyles(markup, size);
     applyMarkupStyles(ctx, styles);
@@ -1398,6 +1400,11 @@ const drawImage = (ctx, size, markup, done) => {
         drawMarkupStyles(ctx, styles);
         done();
     };
+
+    image.onerror = () => {
+        error('Error loading markup ' + markup.src);
+    };
+
     image.src = markup.src;
 };
 
@@ -1559,28 +1566,32 @@ const transformImage = (file, instructions, options = {}) =>
         const toBlob = (imageData, options) => {
             const canvas = imageDataToCanvas(imageData);
             const promisedCanvas = markup.length ? canvasApplyMarkup(canvas, markup) : canvas;
-            Promise.resolve(promisedCanvas).then(canvas => {
-                canvasToBlob(canvas, options, beforeCreateBlob)
-                    .then(blob => {
-                        // force release of canvas memory
-                        canvasRelease(canvas);
+            Promise.resolve(promisedCanvas)
+                .then(canvas => {
+                    canvasToBlob(canvas, options, beforeCreateBlob)
+                        .then(blob => {
+                            // force release of canvas memory
+                            canvasRelease(canvas);
 
-                        // remove image head (default)
-                        if (stripImageHead) return resolveWithBlob(blob);
+                            // remove image head (default)
+                            if (stripImageHead) return resolveWithBlob(blob);
 
-                        // try to copy image head from original file to generated blob
-                        getImageHead(file).then(imageHead => {
-                            // re-inject image head in case of JPEG, as the image head is removed by canvas export
-                            if (imageHead !== null) {
-                                blob = new Blob([imageHead, blob.slice(20)], { type: blob.type });
-                            }
+                            // try to copy image head from original file to generated blob
+                            getImageHead(file).then(imageHead => {
+                                // re-inject image head in case of JPEG, as the image head is removed by canvas export
+                                if (imageHead !== null) {
+                                    blob = new Blob([imageHead, blob.slice(20)], {
+                                        type: blob.type,
+                                    });
+                                }
 
-                            // done!
-                            resolveWithBlob(blob);
-                        });
-                    })
-                    .catch(reject);
-            });
+                                // done!
+                                resolveWithBlob(blob);
+                            });
+                        })
+                        .catch(reject);
+                })
+                .catch(reject);
         };
 
         // if this is an svg and we want it to stay an svg
@@ -1861,9 +1872,15 @@ const plugin = ({ addFilter, utils }) => {
                         variants.push(
                             (transform, file, metadata) =>
                                 new Promise(resolve => {
-                                    createVariant(transform, file, metadata).then(file =>
-                                        resolve({ name: key, file })
-                                    );
+                                    createVariant(transform, file, metadata)
+                                        .then(file => resolve({ name: key, file }))
+                                        .catch(err => {
+                                            item.fire('load-file-error', {
+                                                status: {
+                                                    body: err,
+                                                },
+                                            });
+                                        });
                                 })
                         );
                     });

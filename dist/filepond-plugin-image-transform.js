@@ -1425,7 +1425,7 @@
     };
 
     var canvasApplyMarkup = function canvasApplyMarkup(canvas, markup) {
-        return new Promise(function(resolve) {
+        return new Promise(function(resolve, reject) {
             var size = {
                 width: canvas.width,
                 height: canvas.height,
@@ -1436,15 +1436,17 @@
             var drawers = markup.sort(sortMarkupByZIndex).map(function(item) {
                 return function() {
                     return new Promise(function(resolve) {
-                        var result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve);
+                        var result = TYPE_DRAW_ROUTES[item[0]](ctx, size, item[1], resolve, reject);
                         if (result) resolve();
                     });
                 };
             });
 
-            chain(drawers).then(function() {
-                return resolve(canvas);
-            });
+            chain(drawers)
+                .then(function() {
+                    return resolve(canvas);
+                })
+                .catch(reject);
         });
     };
 
@@ -1503,7 +1505,7 @@
         return true;
     };
 
-    var drawImage = function drawImage(ctx, size, markup, done) {
+    var drawImage = function drawImage(ctx, size, markup, done, error) {
         var rect = getMarkupRect(markup, size);
         var styles = getMarkupStyles(markup, size);
         applyMarkupStyles(ctx, styles);
@@ -1547,6 +1549,11 @@
             drawMarkupStyles(ctx, styles);
             done();
         };
+
+        image.onerror = function() {
+            error('Error loading markup ' + markup.src);
+        };
+
         image.src = markup.src;
     };
 
@@ -1722,30 +1729,32 @@
             var toBlob = function toBlob(imageData, options) {
                 var canvas = imageDataToCanvas(imageData);
                 var promisedCanvas = markup.length ? canvasApplyMarkup(canvas, markup) : canvas;
-                Promise.resolve(promisedCanvas).then(function(canvas) {
-                    canvasToBlob(canvas, options, beforeCreateBlob)
-                        .then(function(blob) {
-                            // force release of canvas memory
-                            canvasRelease(canvas);
+                Promise.resolve(promisedCanvas)
+                    .then(function(canvas) {
+                        canvasToBlob(canvas, options, beforeCreateBlob)
+                            .then(function(blob) {
+                                // force release of canvas memory
+                                canvasRelease(canvas);
 
-                            // remove image head (default)
-                            if (stripImageHead) return resolveWithBlob(blob);
+                                // remove image head (default)
+                                if (stripImageHead) return resolveWithBlob(blob);
 
-                            // try to copy image head from original file to generated blob
-                            getImageHead(file).then(function(imageHead) {
-                                // re-inject image head in case of JPEG, as the image head is removed by canvas export
-                                if (imageHead !== null) {
-                                    blob = new Blob([imageHead, blob.slice(20)], {
-                                        type: blob.type,
-                                    });
-                                }
+                                // try to copy image head from original file to generated blob
+                                getImageHead(file).then(function(imageHead) {
+                                    // re-inject image head in case of JPEG, as the image head is removed by canvas export
+                                    if (imageHead !== null) {
+                                        blob = new Blob([imageHead, blob.slice(20)], {
+                                            type: blob.type,
+                                        });
+                                    }
 
-                                // done!
-                                resolveWithBlob(blob);
-                            });
-                        })
-                        .catch(reject);
-                });
+                                    // done!
+                                    resolveWithBlob(blob);
+                                });
+                            })
+                            .catch(reject);
+                    })
+                    .catch(reject);
             };
 
             // if this is an svg and we want it to stay an svg
@@ -3555,9 +3564,17 @@
                         var createVariant = createVariantCreator(fn);
                         variants.push(function(transform, file, metadata) {
                             return new Promise(function(resolve) {
-                                createVariant(transform, file, metadata).then(function(file) {
-                                    return resolve({ name: key, file: file });
-                                });
+                                createVariant(transform, file, metadata)
+                                    .then(function(file) {
+                                        return resolve({ name: key, file: file });
+                                    })
+                                    .catch(function(err) {
+                                        item.fire('load-file-error', {
+                                            status: {
+                                                body: err,
+                                            },
+                                        });
+                                    });
                             });
                         });
                     });
